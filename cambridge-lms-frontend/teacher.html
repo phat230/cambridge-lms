@@ -362,7 +362,7 @@
         }
 
         msgDiv.style.color = "blue";
-        msgDiv.innerText = "Đang tải PDF lên Cloudinary...";
+        msgDiv.innerText = "Đang upload lên Cloudflare R2...";
 
         const formData = new FormData();
         formData.append("pdf_file", pdfFile);
@@ -452,7 +452,7 @@
     }
 
     async function deleteExam(examId) {
-        if (!confirm("Xóa hoàn toàn bài thi này? PDF, audio trên Cloudinary và kết quả nộp bài liên quan cũng sẽ bị xóa.")) return;
+        if (!confirm("Xóa hoàn toàn bài thi này? PDF, audio File trên Cloudflare R2 cũng sẽ bị xóa.")) return;
 
         try {
             const response = await fetch(`${API_URL}/exams/${examId}`, {
