@@ -181,157 +181,232 @@
         </div>
     </div>
 
-    <script>
-        const API_URL = "https://cambridge-lms-1.onrender.com";
-        let currentExamId = null;
-        let partCounter = 0;
 
-        window.onload = function() {
-            if (localStorage.getItem("role") !== "teacher") {
-                window.location.href = "index.html";
-            } else {
-                document.getElementById("userEmailDisplay").innerText = "Giáo viên: " + localStorage.getItem("email");
-                loadExamList(); 
-                addPartRow('listening');
-                addPartRow('reading');
-            }
-        };
+<script>
+    const API_URL = "https://cambridge-lms-1.onrender.com";
+    let currentExamId = null;
+    let partCounter = 0;
 
-        function logout() { localStorage.clear(); window.location.href = "index.html"; }
+    window.onload = function() {
+        if (localStorage.getItem("role") !== "teacher") {
+            window.location.href = "index.html";
+        } else {
+            document.getElementById("userEmailDisplay").innerText = "Giáo viên: " + localStorage.getItem("email");
+            loadExamList();
+            addPartRow('listening');
+            addPartRow('reading');
+        }
+    };
 
-        // --- CÁC HÀM XỬ LÝ MA TRẬN TẠO ĐỀ (BƯỚC 1) ---
-        function addPartRow(sectionPrefix) {
-            partCounter++;
-            const container = document.getElementById(`${sectionPrefix}-parts-container`);
-            const currentPartCount = container.children.length + 1;
-            const partId = `part_${partCounter}`;
-            
-            const partHtml = `
-                <div class="part-card" id="${partId}">
-                    <div class="part-meta-row">
-                        <label>Tên nhánh:</label>
-                        <input type="text" class="part-title-input" value="Part ${currentPartCount}">
-                        <label>Số câu hỏi:</label>
-                        <input type="number" class="part-numeric-input part-qty" placeholder="Số câu" min="1" oninput="generateQuestionsGrid('${partId}')">
-                        <label>Số điểm của Part:</label>
-                        <input type="number" class="part-numeric-input part-score" placeholder="Điểm" min="0" value="25">
-                        <button type="button" class="remove-part-btn" onclick="removePartRow('${partId}')">Xóa Part</button>
-                    </div>
-                    <div class="part-questions-grid" id="${partId}_grid">
-                        <span style="color:#aaa; font-size:13px; padding:5px;">Nhập số câu hỏi để sinh ô đáp án...</span>
-                    </div>
+    function logout() {
+        localStorage.clear();
+        window.location.href = "index.html";
+    }
+
+    async function getApiError(response, defaultMessage) {
+        try {
+            const data = await response.json();
+            return data.detail || defaultMessage;
+        } catch (e) {
+            return defaultMessage;
+        }
+    }
+
+    function addPartRow(sectionPrefix) {
+        partCounter++;
+
+        const container = document.getElementById(`${sectionPrefix}-parts-container`);
+        const currentPartCount = container.children.length + 1;
+        const partId = `part_${partCounter}`;
+
+        const partHtml = `
+            <div class="part-card" id="${partId}">
+                <div class="part-meta-row">
+                    <label>Tên nhánh:</label>
+                    <input type="text" class="part-title-input" value="Part ${currentPartCount}">
+
+                    <label>Số câu hỏi:</label>
+                    <input type="number" class="part-numeric-input part-qty" placeholder="Số câu" min="1" oninput="generateQuestionsGrid('${partId}')">
+
+                    <label>Số điểm của Part:</label>
+                    <input type="number" class="part-numeric-input part-score" placeholder="Điểm" min="0" value="25">
+
+                    <button type="button" class="remove-part-btn" onclick="removePartRow('${partId}')">Xóa Part</button>
+                </div>
+
+                <div class="part-questions-grid" id="${partId}_grid">
+                    <span style="color:#aaa; font-size:13px; padding:5px;">Nhập số câu hỏi để sinh ô đáp án...</span>
+                </div>
+            </div>
+        `;
+
+        container.insertAdjacentHTML('beforeend', partHtml);
+    }
+
+    function removePartRow(partId) {
+        document.getElementById(partId)?.remove();
+    }
+
+    function generateQuestionsGrid(partId) {
+        const partCard = document.getElementById(partId);
+        const qty = parseInt(partCard.querySelector('.part-qty').value);
+        const gridContainer = document.getElementById(`${partId}_grid`);
+
+        gridContainer.innerHTML = "";
+
+        if (!qty || qty <= 0) {
+            gridContainer.innerHTML = `<span style="color:#aaa; font-size:13px; padding:5px;">Nhập số câu hỏi để sinh ô đáp án...</span>`;
+            return;
+        }
+
+        for (let i = 1; i <= qty; i++) {
+            gridContainer.innerHTML += `
+                <div class="answer-box">
+                    <span>${i}</span>
+                    <input type="text" class="q-ans-input" data-qnum="${i}" placeholder="Đáp án...">
                 </div>
             `;
-            container.insertAdjacentHTML('beforeend', partHtml);
         }
+    }
 
-        function removePartRow(partId) { document.getElementById(partId)?.remove(); }
+    document.getElementById("createExamForm").addEventListener("submit", async function(e) {
+        e.preventDefault();
 
-        function generateQuestionsGrid(partId) {
-            const partCard = document.getElementById(partId);
-            const qty = partCard.querySelector('.part-qty').value;
-            const gridContainer = document.getElementById(`${partId}_grid`);
-            gridContainer.innerHTML = "";
-            if (!qty || qty <= 0) return;
+        const msgDiv = document.getElementById("createMessage");
+        msgDiv.style.color = "blue";
+        msgDiv.innerText = "Đang xử lý ma trận và lưu đề...";
 
-            for (let i = 1; i <= qty; i++) {
-                gridContainer.innerHTML += `<div class="answer-box"><span>${i}</span><input type="text" class="q-ans-input" data-qnum="${i}" placeholder="Đáp án..."></div>`;
-            }
-        }
+        const examStructure = {};
+        let calculatedTotalScore = 0;
 
-        document.getElementById("createExamForm").addEventListener("submit", async function(e) {
-            e.preventDefault();
-            const msgDiv = document.getElementById("createMessage");
-            msgDiv.style.color = "blue";
-            msgDiv.innerText = "Đang xử lý ma trận và lưu đề...";
+        ['listening', 'reading'].forEach(prefix => {
+            const sectionTitle = document.getElementById(`${prefix}-title`).value.trim();
+            const partCards = document.getElementById(`${prefix}-parts-container`).querySelectorAll('.part-card');
 
-            const examStructure = {};
-            let calculatedTotalScore = 0;
+            if (partCards.length > 0) {
+                examStructure[sectionTitle] = {};
 
-            ['listening', 'reading'].forEach(prefix => {
-                const sectionTitle = document.getElementById(`${prefix}-title`).value;
-                const partCards = document.getElementById(`${prefix}-parts-container`).querySelectorAll('.part-card');
-                
-                if (partCards.length > 0) {
-                    examStructure[sectionTitle] = {};
-                    partCards.forEach(card => {
-                        const partTitle = card.querySelector('.part-title-input').value;
-                        const numQuestions = parseInt(card.querySelector('.part-qty').value) || 0;
-                        const partScore = parseFloat(card.querySelector('.part-score').value) || 0;
-                        calculatedTotalScore += partScore;
+                partCards.forEach(card => {
+                    const partTitle = card.querySelector('.part-title-input').value.trim();
+                    const numQuestions = parseInt(card.querySelector('.part-qty').value) || 0;
+                    const partScore = parseFloat(card.querySelector('.part-score').value) || 0;
 
-                        const questionsArray = [];
-                        card.querySelectorAll('.q-ans-input').forEach(inp => {
-                            questionsArray.push({ qNum: parseInt(inp.getAttribute('data-qnum')), answer: inp.value.trim().toLowerCase() });
+                    calculatedTotalScore += partScore;
+
+                    const questionsArray = [];
+
+                    card.querySelectorAll('.q-ans-input').forEach(inp => {
+                        questionsArray.push({
+                            qNum: parseInt(inp.getAttribute('data-qnum')),
+                            answer: inp.value.trim().toLowerCase()
                         });
-
-                        examStructure[sectionTitle][partTitle] = { num_questions: numQuestions, part_score: partScore, questions: questionsArray };
                     });
-                }
+
+                    examStructure[sectionTitle][partTitle] = {
+                        num_questions: numQuestions,
+                        part_score: partScore,
+                        questions: questionsArray
+                    };
+                });
+            }
+        });
+
+        const payload = {
+            title: document.getElementById("examTitle").value.trim(),
+            level: document.getElementById("examLevel").value,
+            duration_minutes: parseInt(document.getElementById("examDuration").value),
+            total_score: calculatedTotalScore,
+            answer_key: examStructure
+        };
+
+        try {
+            const response = await fetch(`${API_URL}/exams/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             });
 
-            const payload = {
-                title: document.getElementById("examTitle").value,
-                level: document.getElementById("examLevel").value,
-                duration_minutes: parseInt(document.getElementById("examDuration").value),
-                total_score: calculatedTotalScore,
-                answer_key: examStructure 
-            };
+            const data = await response.json();
 
-            try {
-                const response = await fetch(`${API_URL}/exams/`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const data = await response.json();
+            if (response.ok) {
+                msgDiv.style.color = "green";
+                msgDiv.innerText = "Đã lưu ma trận! Mở khóa khu vực tải file.";
 
-                if (response.ok) {
-                    msgDiv.style.color = "green";
-                    msgDiv.innerText = "Đã lưu ma trận! Mở khóa khu vực tải file.";
-                    document.getElementById("createExamForm").querySelectorAll("input, select, button").forEach(el => el.disabled = true);
-                    
-                    currentExamId = data.exam_id;
-                    document.getElementById("currentExamIdDisplay").innerText = currentExamId;
-                    document.getElementById("uploadSection").style.display = "block";
-                    
-                    loadExamList();
-                    reloadAudioFolders(); // Gọi hàm load thư mục trống ban đầu
-                } else { msgDiv.style.color = "red"; msgDiv.innerText = "Thất bại khi lưu cấu trúc đề."; }
-            } catch (error) { msgDiv.style.color = "red"; msgDiv.innerText = "Mất kết nối backend."; }
-        });
+                document.getElementById("createExamForm")
+                    .querySelectorAll("input, select, button")
+                    .forEach(el => el.disabled = true);
 
-        // --- BƯỚC 2: TẢI FILE PDF ĐỘC LẬP ---
-        document.getElementById("uploadPdfForm").addEventListener("submit", async function(e) {
-            e.preventDefault();
-            const msgDiv = document.getElementById("pdfMessage");
-            const pdfFile = document.getElementById("pdfFile").files[0];
-            if(!pdfFile) return;
+                currentExamId = data.exam_id;
+                document.getElementById("currentExamIdDisplay").innerText = currentExamId;
+                document.getElementById("uploadSection").style.display = "block";
 
-            msgDiv.style.color = "blue";
-            msgDiv.innerText = "Đang tải PDF lên...";
+                loadExamList();
+                reloadAudioFolders();
+            } else {
+                msgDiv.style.color = "red";
+                msgDiv.innerText = data.detail || "Thất bại khi lưu cấu trúc đề.";
+            }
+        } catch (error) {
+            console.error(error);
+            msgDiv.style.color = "red";
+            msgDiv.innerText = "Mất kết nối backend.";
+        }
+    });
 
-            const formData = new FormData();
-            formData.append("pdf_file", pdfFile);
+    document.getElementById("uploadPdfForm").addEventListener("submit", async function(e) {
+        e.preventDefault();
 
-            try {
-                const response = await fetch(`${API_URL}/exams/${currentExamId}/upload-pdf/`, { method: 'POST', body: formData });
-                if (response.ok) {
-                    msgDiv.style.color = "green";
-                    msgDiv.innerText = "Tải PDF thành công!";
-                    loadExamList();
-                } else { msgDiv.style.color = "red"; msgDiv.innerText = "Lỗi upload PDF."; }
-            } catch (error) { msgDiv.style.color = "red"; msgDiv.innerText = "Mất kết nối backend."; }
-        });
+        const msgDiv = document.getElementById("pdfMessage");
+        const pdfFile = document.getElementById("pdfFile").files[0];
 
+        if (!currentExamId) {
+            msgDiv.style.color = "red";
+            msgDiv.innerText = "Bạn cần tạo bài thi trước khi upload PDF.";
+            return;
+        }
 
-        // --- BƯỚC 3: TRÌNH QUẢN LÝ AUDIO FOLDERS ---
-        async function reloadAudioFolders() {
-            if(!currentExamId) return;
+        if (!pdfFile) {
+            msgDiv.style.color = "red";
+            msgDiv.innerText = "Vui lòng chọn file PDF.";
+            return;
+        }
+
+        msgDiv.style.color = "blue";
+        msgDiv.innerText = "Đang tải PDF lên Cloudinary...";
+
+        const formData = new FormData();
+        formData.append("pdf_file", pdfFile);
+
+        try {
+            const response = await fetch(`${API_URL}/exams/${currentExamId}/upload-pdf/`, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (response.ok) {
+                msgDiv.style.color = "green";
+                msgDiv.innerText = "Tải PDF thành công!";
+                document.getElementById("pdfFile").value = "";
+                loadExamList();
+            } else {
+                msgDiv.style.color = "red";
+                msgDiv.innerText = await getApiError(response, "Lỗi upload PDF.");
+            }
+        } catch (error) {
+            console.error(error);
+            msgDiv.style.color = "red";
+            msgDiv.innerText = "Mất kết nối backend.";
+        }
+    });
+
+    async function reloadAudioFolders() {
+        if (!currentExamId) return;
+
+        try {
             const response = await fetch(`${API_URL}/exams/`);
             const exams = await response.json();
             const currentExam = exams.find(e => e._id === currentExamId);
-            
+
             const container = document.getElementById("audioFoldersList");
             container.innerHTML = "";
 
@@ -342,9 +417,10 @@
 
             currentExam.audio_folders.forEach(folder => {
                 const limitText = folder.limit > 0 ? `Giới hạn: ${folder.limit} lần/file` : "Nghe vô hạn";
-                
+
                 let tracksHtml = "";
-                if(folder.tracks && folder.tracks.length > 0) {
+
+                if (folder.tracks && folder.tracks.length > 0) {
                     folder.tracks.forEach(track => {
                         tracksHtml += `
                             <li>
@@ -354,7 +430,7 @@
                         `;
                     });
                 } else {
-                    tracksHtml = "<li style='color: #999; font-style: italic;'>Thư mục trống. Hãy chọn file mp3 tải lên.</li>";
+                    tracksHtml = "<li style='color: #999; font-style: italic;'>Thư mục trống. Hãy chọn file mp3, wav hoặc ogg tải lên.</li>";
                 }
 
                 const folderHtml = `
@@ -362,88 +438,162 @@
                         <div class="folder-header">
                             <h4>📁 ${folder.name} <span class="folder-limit-badge">${limitText}</span></h4>
                         </div>
+
                         <ul class="track-list">
                             ${tracksHtml}
                         </ul>
+
                         <div class="upload-audio-box">
                             <input type="file" id="file_input_${folder.id}" accept=".mp3,.wav,.ogg" multiple style="font-size: 13px;">
                             <button class="submit-btn" style="width: auto; margin:0; padding: 6px 12px; font-size: 12px;" onclick="uploadToFolder('${folder.id}')">Tải nhạc vào đây</button>
                         </div>
                     </div>
                 `;
+
                 container.insertAdjacentHTML('beforeend', folderHtml);
             });
+        } catch (error) {
+            console.error(error);
+            alert("Không thể tải danh sách thư mục audio.");
+        }
+    }
+
+    async function createAudioFolder() {
+        const folderName = document.getElementById("newFolderName").value.trim();
+        const limit = parseInt(document.getElementById("newFolderLimit").value);
+
+        if (!currentExamId) {
+            alert("Bạn cần tạo bài thi trước.");
+            return;
         }
 
-        async function createAudioFolder() {
-            const folderName = document.getElementById("newFolderName").value.trim();
-            const limit = parseInt(document.getElementById("newFolderLimit").value);
-            
-            if(!folderName) { alert("Vui lòng nhập tên thư mục"); return; }
-
-            try {
-                const response = await fetch(`${API_URL}/exams/${currentExamId}/audio-folders/`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ folder_name: folderName, limit: limit })
-                });
-                if(response.ok) {
-                    document.getElementById("newFolderName").value = "";
-                    reloadAudioFolders(); // Cập nhật lại giao diện
-                } else { alert("Lỗi khi tạo thư mục"); }
-            } catch (error) { alert("Mất kết nối backend"); }
+        if (!folderName) {
+            alert("Vui lòng nhập tên thư mục");
+            return;
         }
 
-        async function uploadToFolder(folderId) {
-            const fileInput = document.getElementById(`file_input_${folderId}`);
-            if(fileInput.files.length === 0) { alert("Vui lòng chọn ít nhất 1 file mp3"); return; }
+        try {
+            const response = await fetch(`${API_URL}/exams/${currentExamId}/audio-folders/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ folder_name: folderName, limit: limit })
+            });
 
-            const formData = new FormData();
-            for (let i = 0; i < fileInput.files.length; i++) {
-                formData.append("audio_files", fileInput.files[i]);
-            }
-
-            try {
-                const response = await fetch(`${API_URL}/exams/${currentExamId}/audio-folders/${folderId}/upload`, {
-                    method: 'POST',
-                    body: formData
-                });
-                if(response.ok) {
-                    reloadAudioFolders(); // Làm mới danh sách nhạc
-                } else { alert("Tải nhạc thất bại"); }
-            } catch (error) { alert("Mất kết nối backend"); }
-        }
-
-        async function deleteTrack(folderId, trackId) {
-            if(!confirm("Xóa bài nhạc này?")) return;
-            try {
-                await fetch(`${API_URL}/exams/${currentExamId}/audio-folders/${folderId}/tracks/${trackId}`, { method: 'DELETE' });
+            if (response.ok) {
+                document.getElementById("newFolderName").value = "";
                 reloadAudioFolders();
-            } catch(e) { alert("Lỗi hệ thống"); }
+            } else {
+                alert(await getApiError(response, "Lỗi khi tạo thư mục"));
+            }
+        } catch (error) {
+            console.error(error);
+            alert("Mất kết nối backend");
+        }
+    }
+
+    async function uploadToFolder(folderId) {
+        const fileInput = document.getElementById(`file_input_${folderId}`);
+
+        if (!fileInput || fileInput.files.length === 0) {
+            alert("Vui lòng chọn ít nhất 1 file audio");
+            return;
         }
 
+        const formData = new FormData();
 
-        // --- QUẢN LÝ DANH SÁCH BÀI THI ---
-        async function loadExamList() {
-            try {
-                const response = await fetch(`${API_URL}/exams/`);
-                const exams = await response.json();
-                const tbody = document.getElementById("examListBody");
-                tbody.innerHTML = "";
-                exams.forEach(exam => {
-                    const pdfStatus = exam.pdf_file_url ? `<span class="status-badge status-ok">Đã có PDF</span>` : `<span class="status-badge status-missing">Thiếu PDF</span>`;
-                    const audioCount = exam.audio_folders ? exam.audio_folders.length : 0;
-                    
-                    tbody.innerHTML += `<tr><td><strong>${exam.title}</strong></td><td>${exam.level}</td><td>${pdfStatus}</td><td>${audioCount} thư mục</td><td><button class="delete-btn" onclick="deleteExam('${exam._id}')">Xóa toàn bộ</button></td></tr>`;
-                });
-            } catch (error) { console.error(error); }
+        for (let i = 0; i < fileInput.files.length; i++) {
+            formData.append("audio_files", fileInput.files[i]);
         }
 
-        async function deleteExam(examId) {
-            if (!confirm("Xóa hoàn toàn bài thi này?")) return;
-            await fetch(`${API_URL}/exams/${examId}`, { method: 'DELETE' });
-            loadExamList();
+        try {
+            const response = await fetch(`${API_URL}/exams/${currentExamId}/audio-folders/${folderId}/upload`, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (response.ok) {
+                alert("Tải audio thành công!");
+                reloadAudioFolders();
+            } else {
+                alert(await getApiError(response, "Tải nhạc thất bại"));
+            }
+        } catch (error) {
+            console.error(error);
+            alert("Mất kết nối backend");
         }
-    </script>
+    }
+
+    async function deleteTrack(folderId, trackId) {
+        if (!confirm("Xóa bài nhạc này?")) return;
+
+        try {
+            const response = await fetch(`${API_URL}/exams/${currentExamId}/audio-folders/${folderId}/tracks/${trackId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                reloadAudioFolders();
+            } else {
+                alert(await getApiError(response, "Xóa audio thất bại"));
+            }
+        } catch (error) {
+            console.error(error);
+            alert("Lỗi hệ thống");
+        }
+    }
+
+    async function loadExamList() {
+        try {
+            const response = await fetch(`${API_URL}/exams/`);
+            const exams = await response.json();
+
+            const tbody = document.getElementById("examListBody");
+            tbody.innerHTML = "";
+
+            exams.forEach(exam => {
+                const pdfStatus = exam.pdf_file_url
+                    ? `<span class="status-badge status-ok">Đã có PDF</span>`
+                    : `<span class="status-badge status-missing">Thiếu PDF</span>`;
+
+                const audioCount = exam.audio_folders ? exam.audio_folders.length : 0;
+
+                tbody.innerHTML += `
+                    <tr>
+                        <td><strong>${exam.title}</strong></td>
+                        <td>${exam.level}</td>
+                        <td>${pdfStatus}</td>
+                        <td>${audioCount} thư mục</td>
+                        <td>
+                            <button class="delete-btn" onclick="deleteExam('${exam._id}')">Xóa toàn bộ</button>
+                        </td>
+                    </tr>
+                `;
+            });
+        } catch (error) {
+            console.error(error);
+        }
+    }
+
+    async function deleteExam(examId) {
+        if (!confirm("Xóa hoàn toàn bài thi này? PDF và audio trên Cloudinary cũng sẽ bị xóa nếu backend đã lưu public_id.")) return;
+
+        try {
+            const response = await fetch(`${API_URL}/exams/${examId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                loadExamList();
+            } else {
+                alert(await getApiError(response, "Xóa bài thi thất bại"));
+            }
+        } catch (error) {
+            console.error(error);
+            alert("Lỗi hệ thống");
+        }
+    }
+</script>
+
+
 </body>
 </html>

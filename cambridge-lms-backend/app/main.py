@@ -1,24 +1,18 @@
 import os
-import shutil
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
+import cloudinary
+import cloudinary.uploader
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import FastAPI, Body, HTTPException, status, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from passlib.context import CryptContext
 
 from app.database import ping_database, database
 from app.models import ExamSchema, StudentRegister, UserLogin
-
-
-# ==========================================
-# TẠO THƯ MỤC LƯU TRỮ FILE
-# ==========================================
-os.makedirs("uploads/pdfs", exist_ok=True)
-os.makedirs("uploads/audios", exist_ok=True)
 
 
 # ==========================================
@@ -43,7 +37,30 @@ user_collection = database.get_collection("users")
 
 
 # ==========================================
-# HELPER: KIỂM TRA OBJECT ID
+# CLOUDINARY CONFIG
+# ==========================================
+CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
+CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
+CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
+
+cloudinary.config(
+    cloud_name=CLOUDINARY_CLOUD_NAME,
+    api_key=CLOUDINARY_API_KEY,
+    api_secret=CLOUDINARY_API_SECRET,
+    secure=True
+)
+
+
+def check_cloudinary_config():
+    if not CLOUDINARY_CLOUD_NAME or not CLOUDINARY_API_KEY or not CLOUDINARY_API_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Thiếu cấu hình Cloudinary. Hãy kiểm tra CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET."
+        )
+
+
+# ==========================================
+# HELPERS
 # ==========================================
 def get_object_id(id_value: str) -> ObjectId:
     try:
@@ -55,11 +72,38 @@ def get_object_id(id_value: str) -> ObjectId:
         )
 
 
+def safe_public_id(filename: str) -> str:
+    """
+    Chuyển tên file thành dạng an toàn để đưa lên Cloudinary.
+    VD: "CD 1 - Track 01.mp3" -> "CD_1_-_Track_01"
+    """
+    name_without_ext = filename.rsplit(".", 1)[0]
+    name_without_ext = name_without_ext.strip().replace(" ", "_")
+    name_without_ext = re.sub(r"[^a-zA-Z0-9_\-]", "_", name_without_ext)
+    return name_without_ext or str(ObjectId())
+
+
+async def delete_cloudinary_asset(public_id: str | None, resource_type: str | None):
+    """
+    Xóa file trên Cloudinary nếu có public_id.
+    Nếu xóa lỗi thì không làm crash API, chỉ bỏ qua.
+    """
+    if not public_id:
+        return
+
+    try:
+        cloudinary.uploader.destroy(
+            public_id,
+            resource_type=resource_type or "raw"
+        )
+    except Exception as e:
+        print(f"Không thể xóa Cloudinary asset {public_id}: {e}")
+
+
 # ==========================================
 # LIFESPAN
-# Lưu ý:
 # Đã xóa seed_teacher_account().
-# Backend chỉ kiểm tra kết nối MongoDB khi khởi động.
+# Backend chỉ kiểm tra MongoDB khi khởi động.
 # ==========================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -90,12 +134,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-# ==========================================
-# STATIC FILES
-# ==========================================
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 
 # ==========================================
@@ -182,8 +220,6 @@ async def get_all_exams():
 async def create_exam(exam: ExamSchema = Body(...)):
     exam_dict = exam.model_dump()
     exam_dict["created_at"] = datetime.now(timezone.utc)
-
-    # Khi tạo bài thi mới, khởi tạo danh sách thư mục audio rỗng
     exam_dict["audio_folders"] = []
 
     new_exam = await exam_collection.insert_one(exam_dict)
@@ -201,22 +237,45 @@ async def create_exam(exam: ExamSchema = Body(...)):
 async def delete_exam(exam_id: str):
     exam_object_id = get_object_id(exam_id)
 
+    exam = await exam_collection.find_one({"_id": exam_object_id})
+    if not exam:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy bài thi"
+        )
+
+    # Xóa PDF trên Cloudinary nếu có
+    await delete_cloudinary_asset(
+        exam.get("pdf_public_id"),
+        exam.get("pdf_resource_type", "raw")
+    )
+
+    # Xóa audio trên Cloudinary nếu có
+    for folder in exam.get("audio_folders", []):
+        for track in folder.get("tracks", []):
+            await delete_cloudinary_asset(
+                track.get("public_id"),
+                track.get("resource_type", "video")
+            )
+
     result = await exam_collection.delete_one({"_id": exam_object_id})
 
     if result.deleted_count == 1:
         return {"message": "Đã xóa bài thi"}
 
     raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="Không tìm thấy bài thi"
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Không thể xóa bài thi"
     )
 
 
 # ==========================================
-# UPLOAD PDF API
+# UPLOAD PDF API - CLOUDINARY
 # ==========================================
 @app.post("/exams/{exam_id}/upload-pdf/")
 async def upload_exam_pdf(exam_id: str, pdf_file: UploadFile = File(...)):
+    check_cloudinary_config()
+
     exam_object_id = get_object_id(exam_id)
 
     exam = await exam_collection.find_one({"_id": exam_object_id})
@@ -226,24 +285,56 @@ async def upload_exam_pdf(exam_id: str, pdf_file: UploadFile = File(...)):
             detail="Không tìm thấy bài thi"
         )
 
-    if not pdf_file.filename.lower().endswith(".pdf"):
+    filename = pdf_file.filename or ""
+
+    if not filename.lower().endswith(".pdf"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Chỉ cho phép tải file PDF"
         )
 
-    safe_filename = pdf_file.filename.replace(" ", "_")
-    pdf_path = f"uploads/pdfs/{exam_id}_{safe_filename}"
-
-    with open(pdf_path, "wb") as buffer:
-        shutil.copyfileobj(pdf_file.file, buffer)
-
-    await exam_collection.update_one(
-        {"_id": exam_object_id},
-        {"$set": {"pdf_file_url": f"/{pdf_path}"}}
+    # Nếu bài thi đã có PDF cũ trên Cloudinary thì xóa trước
+    await delete_cloudinary_asset(
+        exam.get("pdf_public_id"),
+        exam.get("pdf_resource_type", "raw")
     )
 
-    return {"message": "Tải PDF thành công!"}
+    try:
+        public_id = f"cambridge_lms/pdfs/{exam_id}_{safe_public_id(filename)}"
+
+        upload_result = cloudinary.uploader.upload(
+            pdf_file.file,
+            resource_type="raw",
+            public_id=public_id,
+            overwrite=True
+        )
+
+        pdf_url = upload_result.get("secure_url")
+
+        if not pdf_url:
+            raise Exception("Cloudinary không trả về secure_url")
+
+        await exam_collection.update_one(
+            {"_id": exam_object_id},
+            {
+                "$set": {
+                    "pdf_file_url": pdf_url,
+                    "pdf_public_id": public_id,
+                    "pdf_resource_type": "raw"
+                }
+            }
+        )
+
+        return {
+            "message": "Tải PDF thành công!",
+            "pdf_file_url": pdf_url
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Lỗi upload PDF: {str(e)}"
+        )
 
 
 # ==========================================
@@ -296,13 +387,15 @@ async def create_audio_folder(
     }
 
 
-# 2. Tải file audio vào thư mục
+# 2. Upload audio lên Cloudinary
 @app.post("/exams/{exam_id}/audio-folders/{folder_id}/upload")
 async def upload_audio_to_folder(
     exam_id: str,
     folder_id: str,
     audio_files: list[UploadFile] = File(...)
 ):
+    check_cloudinary_config()
+
     exam_object_id = get_object_id(exam_id)
 
     exam = await exam_collection.find_one({"_id": exam_object_id})
@@ -331,17 +424,34 @@ async def upload_audio_to_folder(
         if not filename.lower().endswith((".mp3", ".wav", ".ogg")):
             continue
 
-        safe_name = filename.replace(" ", "_")
-        path = f"uploads/audios/{exam_id}_{folder_id}_{safe_name}"
+        try:
+            public_id = f"cambridge_lms/audios/{exam_id}_{folder_id}_{safe_public_id(filename)}"
 
-        with open(path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            upload_result = cloudinary.uploader.upload(
+                file.file,
+                resource_type="video",
+                public_id=public_id,
+                overwrite=True
+            )
 
-        uploaded_tracks.append({
-            "id": str(ObjectId()),
-            "name": filename,
-            "url": f"/{path}"
-        })
+            audio_url = upload_result.get("secure_url")
+
+            if not audio_url:
+                raise Exception("Cloudinary không trả về secure_url")
+
+            uploaded_tracks.append({
+                "id": str(ObjectId()),
+                "name": filename,
+                "url": audio_url,
+                "public_id": public_id,
+                "resource_type": "video"
+            })
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Lỗi upload audio {filename}: {str(e)}"
+            )
 
     if not uploaded_tracks:
         raise HTTPException(
@@ -365,6 +475,35 @@ async def upload_audio_to_folder(
 async def delete_audio_track(exam_id: str, folder_id: str, track_id: str):
     exam_object_id = get_object_id(exam_id)
 
+    exam = await exam_collection.find_one({"_id": exam_object_id})
+    if not exam:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy bài thi"
+        )
+
+    target_track = None
+
+    for folder in exam.get("audio_folders", []):
+        if folder.get("id") == folder_id:
+            for track in folder.get("tracks", []):
+                if track.get("id") == track_id:
+                    target_track = track
+                    break
+
+    if not target_track:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy file audio để xóa"
+        )
+
+    # Xóa trên Cloudinary nếu có
+    await delete_cloudinary_asset(
+        target_track.get("public_id"),
+        target_track.get("resource_type", "video")
+    )
+
+    # Xóa trong MongoDB
     result = await exam_collection.update_one(
         {"_id": exam_object_id, "audio_folders.id": folder_id},
         {"$pull": {"audio_folders.$.tracks": {"id": track_id}}}
@@ -377,3 +516,4 @@ async def delete_audio_track(exam_id: str, folder_id: str, track_id: str):
         )
 
     return {"message": "Đã xóa file"}
+

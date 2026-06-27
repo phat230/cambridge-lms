@@ -111,281 +111,373 @@
         <button class="submit-btn" style="margin-top: 20px; width: 100%;" onclick="backToDashboard()">Quay về Trang chủ</button>
     </div>
 
-    <script>
-        const API_URL = "https://cambridge-lms-1.onrender.com";
-        let timerInterval;
-        let currentPdfUrl = "";
-        let examsDataList = [];
-        let activeExamData = null;
+    ```html
+<script>
+    const API_URL = "https://cambridge-lms-1.onrender.com";
 
-        window.onload = function() {
-            if (localStorage.getItem("role") !== "student") {
-                window.location.href = "index.html";
-            } else {
-                document.getElementById("userEmailDisplay").innerText = "Học viên: " + localStorage.getItem("email");
-                loadExamsForStudent();
-                setupAudioSecureListeners(); // Kích hoạt bộ theo dõi lượt nghe
+    let timerInterval;
+    let currentPdfUrl = "";
+    let examsDataList = [];
+    let activeExamData = null;
+
+    function getFileUrl(url) {
+        if (!url) return "";
+
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+            return url;
+        }
+
+        return `${API_URL}${url}`;
+    }
+
+    window.onload = function() {
+        if (localStorage.getItem("role") !== "student") {
+            window.location.href = "index.html";
+        } else {
+            document.getElementById("userEmailDisplay").innerText = "Học viên: " + localStorage.getItem("email");
+            loadExamsForStudent();
+            setupAudioSecureListeners();
+        }
+    };
+
+    function logout() {
+        if (confirm("Bạn muốn đăng xuất?")) {
+            localStorage.clear();
+            window.location.href = "index.html";
+        }
+    }
+
+    function changePdfView() {
+        const mode = document.getElementById("pdfViewMode").value;
+
+        if (!currentPdfUrl) {
+            document.getElementById("pdfFrame").src = "";
+            return;
+        }
+
+        document.getElementById("pdfFrame").src = `${currentPdfUrl}#view=${mode}&scrollbar=1&toolbar=0&navpanes=0`;
+    }
+
+    async function loadExamsForStudent() {
+        try {
+            const response = await fetch(`${API_URL}/exams/`);
+            examsDataList = await response.json();
+
+            const grid = document.getElementById("examGrid");
+            grid.innerHTML = "";
+
+            if (examsDataList.length === 0) {
+                grid.innerHTML = "<p>Chưa có bài thi nào hiện khả dụng.</p>";
+                return;
             }
-        };
 
-        function logout() {
-            if(confirm("Bạn muốn đăng xuất?")) { localStorage.clear(); window.location.href = "index.html"; }
+            examsDataList.forEach(exam => {
+                const btnHtml = exam.pdf_file_url != null
+                    ? `<button class="take-exam-btn" onclick="startExam('${exam._id}')">Bắt đầu làm bài</button>`
+                    : `<button class="take-exam-btn" disabled>Chưa có đề</button>`;
+
+                grid.innerHTML += `
+                    <div class="exam-card">
+                        <h3>${exam.title}</h3>
+                        <div class="exam-meta">
+                            <p><strong>Cấp độ:</strong> ${exam.level}</p>
+                            <p><strong>Thời gian:</strong> ${exam.duration_minutes} phút</p>
+                            <p><strong>Tổng điểm:</strong> ${exam.total_score || 100}</p>
+                        </div>
+                        ${btnHtml}
+                    </div>
+                `;
+            });
+        } catch (error) {
+            console.error(error);
+            document.getElementById("examGrid").innerHTML = "<p style='color:red;'>Không thể tải danh sách bài thi.</p>";
+        }
+    }
+
+    function buildAudioPlaylist() {
+        const container = document.getElementById("audioPlaylist");
+        container.innerHTML = "";
+
+        if (!activeExamData.audio_folders || activeExamData.audio_folders.length === 0) {
+            container.innerHTML = "<p style='color:#777; font-size:13px; font-style:italic;'>Bài thi này không có file âm thanh.</p>";
+            return;
         }
 
-        function changePdfView() {
-            const mode = document.getElementById("pdfViewMode").value;
-            document.getElementById("pdfFrame").src = `${currentPdfUrl}#view=${mode}&scrollbar=1&toolbar=0&navpanes=0`;
-        }
+        activeExamData.audio_folders.forEach(folder => {
+            const limit = folder.limit || 0;
+            const limitText = limit > 0 ? `Giới hạn: ${limit} lần/file` : "Nghe tự do";
 
-        async function loadExamsForStudent() {
-            try {
-                const response = await fetch(`${API_URL}/exams/`);
-                examsDataList = await response.json();
-                const grid = document.getElementById("examGrid");
-                grid.innerHTML = "";
+            let folderHtml = `
+                <div class="playlist-folder-block">
+                    <div class="folder-title-bar">
+                        <span>📁 Thư mục: ${folder.name}</span>
+                        <span style="color: #e65100; font-size:12px;">${limitText}</span>
+                    </div>
+            `;
 
-                if(examsDataList.length === 0) {
-                    grid.innerHTML = "<p>Chưa có bài thi nào hiện khả dụng.</p>";
-                    return;
-                }
+            if (!folder.tracks || folder.tracks.length === 0) {
+                folderHtml += `<p style="color:#aaa; font-size:12px; font-style:italic; padding-left:15px;">Thư mục trống.</p>`;
+            } else {
+                folder.tracks.forEach((track, trackIndex) => {
+                    const cleanTrackName = track.name.replace(/_/g, ' ');
+                    const storageKey = `count_${activeExamData._id}_folder_${folder.id}_track_${trackIndex}`;
+                    const currentPlayed = parseInt(localStorage.getItem(storageKey)) || 0;
 
-                examsDataList.forEach(exam => {
-                    const btnHtml = exam.pdf_file_url != null 
-                        ? `<button class="take-exam-btn" onclick="startExam('${exam._id}')">Bắt đầu làm bài</button>`
-                        : `<button class="take-exam-btn" disabled>Chưa có đề</button>`;
+                    const isTrackDisabled = limit > 0 && currentPlayed >= limit;
+                    const statusText = limit > 0 ? `Đã nghe: ${currentPlayed}/${limit} lần` : "Sẵn sàng";
+                    const audioUrl = getFileUrl(track.url);
 
-                    grid.innerHTML += `
-                        <div class="exam-card">
-                            <h3>${exam.title}</h3>
-                            <div class="exam-meta">
-                                <p><strong>Cấp độ:</strong> ${exam.level}</p>
-                                <p><strong>Thời gian:</strong> ${exam.duration_minutes} phút</p>
-                                <p><strong>Tổng điểm:</strong> ${exam.total_score || 100}</p>
+                    folderHtml += `
+                        <div class="audio-track-item">
+                            <div class="track-info">
+                                <strong>${cleanTrackName}</strong>
+                                <span class="track-status" id="track_status_${folder.id}_${trackIndex}" style="${isTrackDisabled ? 'color: #d32f2f;' : ''}">
+                                    ${isTrackDisabled ? "❌ Hết lượt nghe" : statusText}
+                                </span>
                             </div>
-                            ${btnHtml}
+
+                            ${isTrackDisabled ?
+                                `<div style="background: #ffebee; padding: 10px; border-radius: 4px; color: #c62828; font-size: 13px; text-align: center; border: 1px solid #ffcdd2;">Trình phát đã bị khóa do hết số lần nghe quy định.</div>` :
+                                `<audio controls controlsList="nodownload" src="${audioUrl}" style="width: 100%; height: 40px;"
+                                    data-folder-id="${folder.id}" data-track-index="${trackIndex}" data-limit="${limit}"></audio>`
+                            }
                         </div>
                     `;
                 });
-            } catch (error) { console.error(error); }
-        }
-
-        // --- HÀM TẠO DANH SÁCH FILE NGHE VỚI THANH PHÁT TRỰC TIẾP ---
-        function buildAudioPlaylist() {
-            const container = document.getElementById("audioPlaylist");
-            container.innerHTML = "";
-
-            if (!activeExamData.audio_folders || activeExamData.audio_folders.length === 0) {
-                container.innerHTML = "<p style='color:#777; font-size:13px; font-style:italic;'>Bài thi này không có file âm thanh.</p>";
-                return;
             }
 
-            activeExamData.audio_folders.forEach(folder => {
-                const limit = folder.limit || 0;
-                const limitText = limit > 0 ? `Giới hạn: ${limit} lần/file` : "Nghe tự do";
-                
-                let folderHtml = `
-                    <div class="playlist-folder-block">
-                        <div class="folder-title-bar">
-                            <span>📁 Thư mục: ${folder.name}</span>
-                            <span style="color: #e65100; font-size:12px;">${limitText}</span>
+            folderHtml += `</div>`;
+            container.insertAdjacentHTML('beforeend', folderHtml);
+        });
+    }
+
+    function setupAudioSecureListeners() {
+        const playlistContainer = document.getElementById("audioPlaylist");
+
+        playlistContainer.addEventListener('play', function(e) {
+            if (e.target.tagName === 'AUDIO') {
+                const player = e.target;
+                const folderId = player.dataset.folderId;
+                const trackIndex = player.dataset.trackIndex;
+                const limit = parseInt(player.dataset.limit) || 0;
+
+                if (limit > 0 && !player.dataset.hasCountedInSession) {
+                    const storageKey = `count_${activeExamData._id}_folder_${folderId}_track_${trackIndex}`;
+                    let currentPlayed = parseInt(localStorage.getItem(storageKey)) || 0;
+
+                    currentPlayed++;
+                    localStorage.setItem(storageKey, currentPlayed);
+                    player.dataset.hasCountedInSession = "true";
+
+                    const statusLabel = document.getElementById(`track_status_${folderId}_${trackIndex}`);
+                    statusLabel.innerText = `Đã nghe: ${currentPlayed}/${limit} lần`;
+
+                    if (currentPlayed >= limit) {
+                        statusLabel.style.color = "#e65100";
+                    }
+                }
+            }
+        }, true);
+
+        playlistContainer.addEventListener('ended', function(e) {
+            if (e.target.tagName === 'AUDIO') {
+                const player = e.target;
+                const folderId = player.dataset.folderId;
+                const trackIndex = player.dataset.trackIndex;
+                const limit = parseInt(player.dataset.limit) || 0;
+
+                if (limit > 0) {
+                    const storageKey = `count_${activeExamData._id}_folder_${folderId}_track_${trackIndex}`;
+                    const currentPlayed = parseInt(localStorage.getItem(storageKey)) || 0;
+
+                    if (currentPlayed >= limit) {
+                        const statusLabel = document.getElementById(`track_status_${folderId}_${trackIndex}`);
+                        statusLabel.innerText = "❌ Đã hết lượt nghe";
+                        statusLabel.style.color = "#d32f2f";
+
+                        player.removeAttribute("controls");
+                        alert("Bài nghe đã kết thúc! Bạn đã dùng hết số lần nghe quy định. Trình phát đã bị khóa.");
+                    }
+                }
+            }
+        }, true);
+    }
+
+    function buildAnswerSheet(answerKey) {
+        const container = document.getElementById("dynamicAnswerSheet");
+        container.innerHTML = "";
+
+        if (!answerKey || Object.keys(answerKey).length === 0) {
+            container.innerHTML = "<p style='color:red;'>Bài thi này chưa được giáo viên cấu hình đáp án.</p>";
+            return;
+        }
+
+        for (const [sectionName, parts] of Object.entries(answerKey)) {
+            let sectionHtml = `<div class="exam-section"><h4>${sectionName}</h4>`;
+
+            for (const [partName, partData] of Object.entries(parts)) {
+                sectionHtml += `
+                    <div class="exam-part">
+                        <div class="exam-part-header">
+                            <h5>${partName}</h5>
+                            <span>${partData.num_questions} câu | ${partData.part_score} điểm</span>
                         </div>
+                        <div class="question-grid">
                 `;
 
-                if(!folder.tracks || folder.tracks.length === 0) {
-                    folderHtml += `<p style="color:#aaa; font-size:12px; font-style:italic; padding-left:15px;">Thư mục trống.</p>`;
-                } else {
-                    folder.tracks.forEach((track, trackIndex) => {
-                        const cleanTrackName = track.name.replace(/_/g, ' ');
-                        const storageKey = `count_${activeExamData._id}_folder_${folder.id}_track_${trackIndex}`;
-                        const currentPlayed = parseInt(localStorage.getItem(storageKey)) || 0;
+                partData.questions.forEach(q => {
+                    const inputId = `ans_${sectionName}_${partName}_${q.qNum}`.replace(/\s+/g, '');
 
-                        let isTrackDisabled = limit > 0 && currentPlayed >= limit;
-                        let statusText = limit > 0 ? `Đã nghe: ${currentPlayed}/${limit} lần` : "Sẵn sàng";
+                    sectionHtml += `
+                        <div class="question-row">
+                            <label>${q.qNum}</label>
+                            <input type="text" id="${inputId}" data-section="${sectionName}" data-part="${partName}" data-qnum="${q.qNum}" autocomplete="off" placeholder="...">
+                        </div>
+                    `;
+                });
 
-                        // Nhúng trực tiếp thanh <audio controls> vào HTML
-                        folderHtml += `
-                            <div class="audio-track-item">
-                                <div class="track-info">
-                                    <strong>${cleanTrackName}</strong>
-                                    <span class="track-status" id="track_status_${folder.id}_${trackIndex}" style="${isTrackDisabled ? 'color: #d32f2f;' : ''}">
-                                        ${isTrackDisabled ? "❌ Hết lượt nghe" : statusText}
-                                    </span>
-                                </div>
-                                ${isTrackDisabled ? 
-                                    `<div style="background: #ffebee; padding: 10px; border-radius: 4px; color: #c62828; font-size: 13px; text-align: center; border: 1px solid #ffcdd2;">Trình phát đã bị khóa do hết số lần nghe quy định.</div>` : 
-                                    `<audio controls controlsList="nodownload" src="${API_URL}${track.url}" style="width: 100%; height: 40px;" 
-                                            data-folder-id="${folder.id}" data-track-index="${trackIndex}" data-limit="${limit}"></audio>`
-                                }
-                            </div>
+                sectionHtml += `</div></div>`;
+            }
+
+            sectionHtml += `</div>`;
+            container.innerHTML += sectionHtml;
+        }
+    }
+
+    function startExam(examId) {
+        activeExamData = examsDataList.find(e => e._id === examId);
+
+        if (!activeExamData) {
+            alert("Không tìm thấy bài thi.");
+            return;
+        }
+
+        if (!activeExamData.pdf_file_url) {
+            alert("Bài thi này chưa có file PDF.");
+            return;
+        }
+
+        if (!confirm(`Bắt đầu bài thi "${activeExamData.title}"?`)) return;
+
+        document.getElementById("dashboard").style.display = "none";
+        document.getElementById("examRoom").style.display = "block";
+        document.getElementById("activeExamTitle").innerText = activeExamData.title;
+
+        currentPdfUrl = getFileUrl(activeExamData.pdf_file_url);
+        changePdfView();
+
+        buildAudioPlaylist();
+        buildAnswerSheet(activeExamData.answer_key);
+        startTimer(activeExamData.duration_minutes);
+    }
+
+    function startTimer(minutes) {
+        let timeRemaining = minutes * 60;
+        const timerDisplay = document.getElementById("countdownTimer");
+
+        clearInterval(timerInterval);
+
+        timerInterval = setInterval(() => {
+            timeRemaining--;
+
+            const m = Math.floor(timeRemaining / 60);
+            const s = timeRemaining % 60;
+
+            timerDisplay.innerText = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+
+            if (timeRemaining <= 300) {
+                timerDisplay.classList.add("danger");
+            }
+
+            if (timeRemaining <= 0) {
+                clearInterval(timerInterval);
+                submitExam();
+            }
+        }, 1000);
+    }
+
+    function submitExam() {
+        clearInterval(timerInterval);
+
+        document.querySelectorAll("#audioPlaylist audio").forEach(player => player.pause());
+
+        let totalEarnedScore = 0;
+        let correctQuestionsCount = 0;
+        let totalQuestionsCount = 0;
+
+        const tbody = document.getElementById("mistakeBody");
+        tbody.innerHTML = "";
+
+        if (!activeExamData.answer_key) {
+            alert("Đề thi này bị lỗi đáp án, vui lòng liên hệ giáo viên!");
+            backToDashboard();
+            return;
+        }
+
+        for (const [sectionName, parts] of Object.entries(activeExamData.answer_key)) {
+            tbody.innerHTML += `<tr class="section-header"><td colspan="5"><strong>${sectionName}</strong></td></tr>`;
+
+            for (const [partName, partData] of Object.entries(parts)) {
+                tbody.innerHTML += `<tr class="part-header"><td colspan="5">${partName} (Tổng: ${partData.part_score} điểm)</td></tr>`;
+
+                const pointsPerQuestion = partData.num_questions > 0
+                    ? partData.part_score / partData.num_questions
+                    : 0;
+
+                partData.questions.forEach(q => {
+                    totalQuestionsCount++;
+
+                    const inputId = `ans_${sectionName}_${partName}_${q.qNum}`.replace(/\s+/g, '');
+                    const inputElement = document.getElementById(inputId);
+                    const studentAns = inputElement ? inputElement.value.trim().toLowerCase() : "";
+                    const correctAnsText = q.answer.toLowerCase();
+
+                    if (studentAns === correctAnsText && studentAns !== "") {
+                        totalEarnedScore += pointsPerQuestion;
+                        correctQuestionsCount++;
+
+                        tbody.innerHTML += `
+                            <tr>
+                                <td>Câu ${q.qNum}</td>
+                                <td class="correct-text">${studentAns}</td>
+                                <td>${correctAnsText}</td>
+                                <td>+ ${pointsPerQuestion.toFixed(1)}</td>
+                                <td><span style="color: green;">✔ Đúng</span></td>
+                            </tr>
                         `;
-                    });
-                }
-
-                folderHtml += `</div>`;
-                container.insertAdjacentHTML('beforeend', folderHtml);
-            });
-        }
-
-        // --- BẢO MẬT: THEO DÕI VÀ KHÓA LƯỢT NGHE SAU KHI KẾT THÚC BÀI ---
-        function setupAudioSecureListeners() {
-            const playlistContainer = document.getElementById("audioPlaylist");
-            
-            // 1. Khi học sinh bấm Play -> Đếm lượt nghe
-            playlistContainer.addEventListener('play', function(e) {
-                if (e.target.tagName === 'AUDIO') {
-                    const player = e.target;
-                    const folderId = player.dataset.folderId;
-                    const trackIndex = player.dataset.trackIndex;
-                    const limit = parseInt(player.dataset.limit) || 0;
-                    
-                    if (limit > 0 && !player.dataset.hasCountedInSession) {
-                        const storageKey = `count_${activeExamData._id}_folder_${folderId}_track_${trackIndex}`;
-                        let currentPlayed = parseInt(localStorage.getItem(storageKey)) || 0;
-                        
-                        currentPlayed++;
-                        localStorage.setItem(storageKey, currentPlayed);
-                        player.dataset.hasCountedInSession = "true"; 
-
-                        const statusLabel = document.getElementById(`track_status_${folderId}_${trackIndex}`);
-                        statusLabel.innerText = `Đã nghe: ${currentPlayed}/${limit} lần`;
-                        
-                        if (currentPlayed >= limit) {
-                            statusLabel.style.color = "#e65100";
-                        }
+                    } else {
+                        tbody.innerHTML += `
+                            <tr>
+                                <td>Câu ${q.qNum}</td>
+                                <td><span class="wrong-text">${studentAns || "(Trống)"}</span></td>
+                                <td class="correct-text">${correctAnsText}</td>
+                                <td>0</td>
+                                <td><span style="color: red;">✘ Sai</span></td>
+                            </tr>
+                        `;
                     }
-                }
-            }, true);
-
-            // 2. Khi bài hát kết thúc (Ended) -> Khóa luôn nếu hết lượt
-            playlistContainer.addEventListener('ended', function(e) {
-                if (e.target.tagName === 'AUDIO') {
-                    const player = e.target;
-                    const folderId = player.dataset.folderId;
-                    const trackIndex = player.dataset.trackIndex;
-                    const limit = parseInt(player.dataset.limit) || 0;
-                    
-                    if (limit > 0) {
-                        const storageKey = `count_${activeExamData._id}_folder_${folderId}_track_${trackIndex}`;
-                        let currentPlayed = parseInt(localStorage.getItem(storageKey)) || 0;
-                        
-                        if (currentPlayed >= limit) {
-                            const statusLabel = document.getElementById(`track_status_${folderId}_${trackIndex}`);
-                            statusLabel.innerText = "❌ Đã hết lượt nghe";
-                            statusLabel.style.color = "#d32f2f";
-                            
-                            // Gỡ bỏ thanh công cụ để học sinh không bấm play lại được nữa
-                            player.removeAttribute("controls"); 
-                            alert("Bài nghe đã kết thúc! Bạn đã dùng hết số lần nghe quy định. Trình phát đã bị khóa.");
-                        }
-                    }
-                }
-            }, true);
-        }
-
-        function buildAnswerSheet(answerKey) {
-            const container = document.getElementById("dynamicAnswerSheet");
-            container.innerHTML = "";
-            if (!answerKey || Object.keys(answerKey).length === 0) {
-                container.innerHTML = "<p style='color:red;'>Bài thi này chưa được giáo viên cấu hình đáp án.</p>";
-                return;
-            }
-            for (const [sectionName, parts] of Object.entries(answerKey)) {
-                let sectionHtml = `<div class="exam-section"><h4>${sectionName}</h4>`;
-                for (const [partName, partData] of Object.entries(parts)) {
-                    sectionHtml += `<div class="exam-part"><div class="exam-part-header"><h5>${partName}</h5><span>${partData.num_questions} câu | ${partData.part_score} điểm</span></div><div class="question-grid">`;
-                    partData.questions.forEach(q => {
-                        const inputId = `ans_${sectionName}_${partName}_${q.qNum}`.replace(/\s+/g, '');
-                        sectionHtml += `<div class="question-row"><label>${q.qNum}</label><input type="text" id="${inputId}" data-section="${sectionName}" data-part="${partName}" data-qnum="${q.qNum}" autocomplete="off" placeholder="..."></div>`;
-                    });
-                    sectionHtml += `</div></div>`;
-                }
-                sectionHtml += `</div>`;
-                container.innerHTML += sectionHtml;
+                });
             }
         }
 
-        function startExam(examId) {
-            activeExamData = examsDataList.find(e => e._id === examId);
-            if(!confirm(`Bắt đầu bài thi "${activeExamData.title}"?`)) return;
+        document.getElementById("examRoom").style.display = "none";
+        document.getElementById("resultScreen").style.display = "block";
+        document.getElementById("finalScoreDisplay").innerText = totalEarnedScore.toFixed(2);
+        document.getElementById("correctCountDisplay").innerText = `${correctQuestionsCount} / ${totalQuestionsCount}`;
+    }
 
-            document.getElementById("dashboard").style.display = "none";
-            document.getElementById("examRoom").style.display = "block";
-            document.getElementById("activeExamTitle").innerText = activeExamData.title;
+    function backToDashboard() {
+        document.querySelectorAll("#audioPlaylist audio").forEach(player => player.pause());
 
-            currentPdfUrl = `${API_URL}${activeExamData.pdf_file_url}`;
-            changePdfView(); 
+        document.getElementById("resultScreen").style.display = "none";
+        document.getElementById("dashboard").style.display = "block";
+        document.getElementById("pdfFrame").src = "";
 
-            buildAudioPlaylist(); 
-            buildAnswerSheet(activeExamData.answer_key);
-            startTimer(activeExamData.duration_minutes);
-        }
+        currentPdfUrl = "";
+        activeExamData = null;
+    }
+</script>
+```
 
-        function startTimer(minutes) {
-            let timeRemaining = minutes * 60;
-            const timerDisplay = document.getElementById("countdownTimer");
-            timerInterval = setInterval(() => {
-                timeRemaining--;
-                let m = Math.floor(timeRemaining / 60);
-                let s = timeRemaining % 60;
-                timerDisplay.innerText = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-                if (timeRemaining <= 300) timerDisplay.classList.add("danger");
-                if (timeRemaining <= 0) { clearInterval(timerInterval); submitExam(); }
-            }, 1000);
-        }
-
-        function submitExam() {
-            clearInterval(timerInterval);
-            
-            // Tìm và tắt tất cả các trình phát nhạc đang mở khi nộp bài
-            document.querySelectorAll("#audioPlaylist audio").forEach(player => player.pause());
-
-            let totalEarnedScore = 0;
-            let correctQuestionsCount = 0;
-            let totalQuestionsCount = 0;
-            const tbody = document.getElementById("mistakeBody");
-            tbody.innerHTML = "";
-
-            if(!activeExamData.answer_key) {
-                alert("Đề thi này bị lỗi đáp án, vui lòng liên hệ giáo viên!");
-                backToDashboard();
-                return;
-            }
-
-            for (const [sectionName, parts] of Object.entries(activeExamData.answer_key)) {
-                tbody.innerHTML += `<tr class="section-header"><td colspan="5"><strong>${sectionName}</strong></td></tr>`;
-                for (const [partName, partData] of Object.entries(parts)) {
-                    tbody.innerHTML += `<tr class="part-header"><td colspan="5">${partName} (Tổng: ${partData.part_score} điểm)</td></tr>`;
-                    const pointsPerQuestion = partData.num_questions > 0 ? (partData.part_score / partData.num_questions) : 0;
-
-                    partData.questions.forEach(q => {
-                        totalQuestionsCount++;
-                        const inputId = `ans_${sectionName}_${partName}_${q.qNum}`.replace(/\s+/g, '');
-                        const inputElement = document.getElementById(inputId);
-                        const studentAns = inputElement ? inputElement.value.trim().toLowerCase() : "";
-                        const correctAnsText = q.answer.toLowerCase();
-
-                        if (studentAns === correctAnsText && studentAns !== "") {
-                            totalEarnedScore += pointsPerQuestion;
-                            correctQuestionsCount++;
-                            tbody.innerHTML += `<tr><td>Câu ${q.qNum}</td><td class="correct-text">${studentAns}</td><td>${correctAnsText}</td><td>+ ${pointsPerQuestion.toFixed(1)}</td><td><span style="color: green;">✔ Đúng</span></td></tr>`;
-                        } else {
-                            tbody.innerHTML += `<tr><td>Câu ${q.qNum}</td><td><span class="wrong-text">${studentAns || "(Trống)"}</span></td><td class="correct-text">${correctAnsText}</td><td>0</td><td><span style="color: red;">✘ Sai</span></td></tr>`;
-                        }
-                    });
-                }
-            }
-            document.getElementById("examRoom").style.display = "none";
-            document.getElementById("resultScreen").style.display = "block";
-            document.getElementById("finalScoreDisplay").innerText = totalEarnedScore.toFixed(2);
-            document.getElementById("correctCountDisplay").innerText = `${correctQuestionsCount} / ${totalQuestionsCount}`;
-        }
-
-        function backToDashboard() {
-            document.querySelectorAll("#audioPlaylist audio").forEach(player => player.pause());
-            document.getElementById("resultScreen").style.display = "none";
-            document.getElementById("dashboard").style.display = "block";
-            document.getElementById("pdfFrame").src = "";
-        }
-    </script>
 </body>
 </html>
