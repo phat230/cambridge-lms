@@ -44,7 +44,7 @@ submission_collection = database.get_collection("submissions")
 CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
 CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
 CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
-
+CLOUDINARY_CHUNK_SIZE = 20 * 1024 * 1024 
 cloudinary.config(
     cloud_name=CLOUDINARY_CLOUD_NAME,
     api_key=CLOUDINARY_API_KEY,
@@ -334,11 +334,12 @@ async def upload_exam_pdf(exam_id: str, pdf_file: UploadFile = File(...)):
     try:
         requested_public_id = f"cambridge_lms/pdfs/{exam_id}_{safe_public_id(filename)}"
 
-        upload_result = cloudinary.uploader.upload(
-            pdf_file.file,
+        upload_result = cloudinary.uploader.upload_large(
+        pdf_file.file,
             resource_type="raw",
             public_id=requested_public_id,
-            overwrite=True
+            overwrite=True,
+            chunk_size=CLOUDINARY_CHUNK_SIZE
         )
 
         pdf_url = upload_result.get("secure_url")
@@ -530,11 +531,12 @@ async def upload_audio_to_folder(
         try:
             requested_public_id = f"cambridge_lms/audios/{exam_id}_{folder_id}_{safe_public_id(filename)}"
 
-            upload_result = cloudinary.uploader.upload(
+            upload_result = cloudinary.uploader.upload_large(
                 file.file,
                 resource_type="video",
-                public_id=requested_public_id,
-                overwrite=True
+                public_id=public_id,
+                overwrite=True,
+                chunk_size=CLOUDINARY_CHUNK_SIZE
             )
 
             audio_url = upload_result.get("secure_url")
@@ -626,11 +628,12 @@ async def replace_audio_track(
 
     requested_public_id = f"cambridge_lms/audios/{exam_id}_{folder_id}_{safe_public_id(filename)}"
 
-    upload_result = cloudinary.uploader.upload(
+    upload_result = cloudinary.uploader.upload_large(
         audio_file.file,
         resource_type="video",
-        public_id=requested_public_id,
-        overwrite=True
+        public_id=public_id,
+        overwrite=True,
+        chunk_size=CLOUDINARY_CHUNK_SIZE
     )
 
     audio_url = upload_result.get("secure_url")

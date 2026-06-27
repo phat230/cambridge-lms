@@ -334,7 +334,7 @@
                 reloadAudioFolders();
             } else {
                 msgDiv.style.color = "red";
-                msgDiv.innerText = data.detail || "Thất bại khi lưu cấu trúc đề.";
+                msgDiv.innerText = data.detail || "Lỗi upload PDF. Nếu file quá lớn, hãy thử nén PDF hoặc kiểm tra giới hạn Cloudinary.";
             }
         } catch (error) {
             console.error(error);
