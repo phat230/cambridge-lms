@@ -2,22 +2,22 @@ import os
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 
-# Tải các biến môi trường từ file .env
 load_dotenv()
 
 MONGODB_URL = os.getenv("MONGODB_URL")
 DATABASE_NAME = os.getenv("DATABASE_NAME", "cambridge_lms_db")
 
-# Khởi tạo client kết nối tới MongoDB Atlas
+if not MONGODB_URL:
+    raise RuntimeError("Thiếu biến môi trường MONGODB_URL")
+
 client = AsyncIOMotorClient(MONGODB_URL)
 database = client[DATABASE_NAME]
 
 async def ping_database():
-    """Kiểm tra kết nối và xác thực với MongoDB Atlas"""
     try:
-        # Gửi lệnh ping tới admin database để kiểm tra quyền truy cập
-        await client.admin.command('ping')
+        await client.admin.command("ping")
         print("=== KẾT NỐI MONGODB ATLAS THÀNH CÔNG! ===")
     except Exception as e:
-        print("=== LỖI KẾT NỐI: Vui lòng kiểm tra lại tài khoản/mật khẩu hoặc IP Whitelist ===")
+        print("=== LỖI KẾT NỐI MONGODB ATLAS ===")
         print(f"Chi tiết lỗi: {e}")
+        raise e

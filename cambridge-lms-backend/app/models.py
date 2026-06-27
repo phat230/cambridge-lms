@@ -8,13 +8,8 @@ class ExamSchema(BaseModel):
     duration_minutes: int = Field(...)
     pdf_file_url: Optional[str] = Field(None)
     total_score: float = Field(default=100.0)
-    
-    # Ma trận đáp án (cấu trúc cũ giữ nguyên)
     answer_key: Optional[Dict[str, Any]] = Field(None)
-    
-    # CẤU TRÚC AUDIO MỚI: Mảng các thư mục (Mỗi thư mục chứa limit và danh sách track riêng)
     audio_folders: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
-    
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     class Config:
@@ -25,10 +20,10 @@ class StudentRegister(BaseModel):
     password: str = Field(..., min_length=6)
     confirm_password: str = Field(...)
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def check_passwords_match(self):
         if self.password != self.confirm_password:
-            raise ValueError('Lỗi mật khẩu')
+            raise ValueError("Mật khẩu nhập lại không khớp")
         return self
 
 class UserLogin(BaseModel):
