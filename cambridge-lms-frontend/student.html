@@ -37,7 +37,14 @@
                     <option value="FitPage">Lật từng trang (Vừa màn hình)</option>
                 </select>
             </div>
-            <iframe id="pdfFrame" src=""></iframe>
+
+            <iframe id="pdfFrame" src="" title="PDF bài thi"></iframe>
+
+            <div class="pdf-open-box">
+                <a id="openPdfLink" href="#" target="_blank" rel="noopener">
+                    Mở PDF ở tab mới nếu khung xem không hiển thị
+                </a>
+            </div>
         </div>
 
         <div class="answer-sheet">
@@ -100,6 +107,7 @@
     let currentPdfUrl = "";
     let examsDataList = [];
     let activeExamData = null;
+    let isSubmitting = false;
 
     function getFileUrl(url) {
         if (!url) return "";
@@ -116,6 +124,15 @@
         const m = Math.floor(seconds / 60);
         const s = seconds % 60;
         return `${m}:${s.toString().padStart(2, "0")}`;
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? "")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
     }
 
     window.onload = function() {
@@ -137,24 +154,43 @@
 
     function changePdfView() {
         const mode = document.getElementById("pdfViewMode").value;
+        const pdfFrame = document.getElementById("pdfFrame");
+        const openPdfLink = document.getElementById("openPdfLink");
 
         if (!currentPdfUrl) {
-            document.getElementById("pdfFrame").src = "";
+            pdfFrame.src = "";
+            if (openPdfLink) openPdfLink.href = "#";
             return;
         }
 
-        document.getElementById("pdfFrame").src = `${currentPdfUrl}#view=${mode}&scrollbar=1&toolbar=0&navpanes=0`;
+        const safePdfUrl = encodeURI(currentPdfUrl);
+        const viewerUrl = `${safePdfUrl}#view=${mode}&scrollbar=1&toolbar=0&navpanes=0`;
+
+        pdfFrame.src = "about:blank";
+
+        setTimeout(() => {
+            pdfFrame.src = viewerUrl;
+        }, 100);
+
+        if (openPdfLink) {
+            openPdfLink.href = safePdfUrl;
+        }
     }
 
     async function loadExamsForStudent() {
         try {
             const response = await fetch(`${API_URL}/exams/`);
+
+            if (!response.ok) {
+                throw new Error("Không thể tải danh sách bài thi");
+            }
+
             examsDataList = await response.json();
 
             const grid = document.getElementById("examGrid");
             grid.innerHTML = "";
 
-            if (examsDataList.length === 0) {
+            if (!Array.isArray(examsDataList) || examsDataList.length === 0) {
                 grid.innerHTML = "<p>Chưa có bài thi nào hiện khả dụng.</p>";
                 return;
             }
@@ -164,11 +200,14 @@
             for (const exam of examsDataList) {
                 let submittedData = { submitted: false };
 
-                try {
-                    const checkResponse = await fetch(`${API_URL}/exams/${exam._id}/my-submission/${userId}`);
-                    submittedData = await checkResponse.json();
-                } catch (e) {
-                    submittedData = { submitted: false };
+                if (userId) {
+                    try {
+                        const checkResponse = await fetch(`${API_URL}/exams/${exam._id}/my-submission/${userId}`);
+                        submittedData = await checkResponse.json();
+                    } catch (e) {
+                        console.warn("Không kiểm tra được trạng thái nộp bài:", e);
+                        submittedData = { submitted: false };
+                    }
                 }
 
                 let btnHtml = "";
@@ -181,27 +220,27 @@
                     btnHtml = `<button class="take-exam-btn" disabled>Đã làm bài</button>`;
                     resultHtml = `
                         <div class="student-result-badge">
-                            Điểm: <strong>${sub.score}</strong> |
-                            Đúng: <strong>${sub.correct_count}/${sub.total_questions}</strong> |
-                            TG: <strong>${formatTime(sub.time_spent_seconds)}</strong>
+                            Điểm: <strong>${escapeHtml(sub.score)}</strong> |
+                            Đúng: <strong>${escapeHtml(sub.correct_count)}/${escapeHtml(sub.total_questions)}</strong> |
+                            TG: <strong>${escapeHtml(formatTime(sub.time_spent_seconds))}</strong>
                         </div>
                     `;
                 } else {
-                    btnHtml = `<button class="take-exam-btn" onclick="startExam('${exam._id}')">Bắt đầu làm bài</button>`;
+                    btnHtml = `<button class="take-exam-btn" onclick="startExam('${escapeHtml(exam._id)}')">Bắt đầu làm bài</button>`;
                 }
 
-                grid.innerHTML += `
+                grid.insertAdjacentHTML("beforeend", `
                     <div class="exam-card">
-                        <h3>${exam.title}</h3>
+                        <h3>${escapeHtml(exam.title)}</h3>
                         <div class="exam-meta">
-                            <p><strong>Cấp độ:</strong> ${exam.level}</p>
-                            <p><strong>Thời gian:</strong> ${exam.duration_minutes} phút</p>
-                            <p><strong>Tổng điểm:</strong> ${exam.total_score || 100}</p>
+                            <p><strong>Cấp độ:</strong> ${escapeHtml(exam.level)}</p>
+                            <p><strong>Thời gian:</strong> ${escapeHtml(exam.duration_minutes)} phút</p>
+                            <p><strong>Tổng điểm:</strong> ${escapeHtml(exam.total_score || 100)}</p>
                         </div>
                         ${resultHtml}
                         ${btnHtml}
                     </div>
-                `;
+                `);
             }
         } catch (error) {
             console.error(error);
@@ -225,8 +264,8 @@
             let folderHtml = `
                 <div class="playlist-folder-block">
                     <div class="folder-title-bar">
-                        <span>📁 Thư mục: ${folder.name}</span>
-                        <span>${limitText}</span>
+                        <span>📁 Thư mục: ${escapeHtml(folder.name)}</span>
+                        <span>${escapeHtml(limitText)}</span>
                     </div>
             `;
 
@@ -234,7 +273,7 @@
                 folderHtml += `<p class="hint-text">Thư mục trống.</p>`;
             } else {
                 folder.tracks.forEach((track, trackIndex) => {
-                    const cleanTrackName = track.name.replace(/_/g, ' ');
+                    const cleanTrackName = String(track.name || "").replace(/_/g, " ");
                     const storageKey = `count_${activeExamData._id}_folder_${folder.id}_track_${trackIndex}`;
                     const currentPlayed = parseInt(localStorage.getItem(storageKey)) || 0;
 
@@ -245,16 +284,16 @@
                     folderHtml += `
                         <div class="audio-track-item">
                             <div class="track-info">
-                                <strong>${cleanTrackName}</strong>
-                                <span class="track-status" id="track_status_${folder.id}_${trackIndex}">
-                                    ${isTrackDisabled ? "❌ Hết lượt nghe" : statusText}
+                                <strong>${escapeHtml(cleanTrackName)}</strong>
+                                <span class="track-status" id="track_status_${escapeHtml(folder.id)}_${trackIndex}">
+                                    ${isTrackDisabled ? "❌ Hết lượt nghe" : escapeHtml(statusText)}
                                 </span>
                             </div>
 
                             ${isTrackDisabled ?
                                 `<div class="locked-player">Trình phát đã bị khóa do hết số lần nghe quy định.</div>` :
-                                `<audio controls controlsList="nodownload" src="${audioUrl}"
-                                    data-folder-id="${folder.id}" data-track-index="${trackIndex}" data-limit="${limit}"></audio>`
+                                `<audio controls controlsList="nodownload" src="${escapeHtml(audioUrl)}"
+                                    data-folder-id="${escapeHtml(folder.id)}" data-track-index="${trackIndex}" data-limit="${limit}"></audio>`
                             }
                         </div>
                     `;
@@ -262,15 +301,15 @@
             }
 
             folderHtml += `</div>`;
-            container.insertAdjacentHTML('beforeend', folderHtml);
+            container.insertAdjacentHTML("beforeend", folderHtml);
         });
     }
 
     function setupAudioSecureListeners() {
         const playlistContainer = document.getElementById("audioPlaylist");
 
-        playlistContainer.addEventListener('play', function(e) {
-            if (e.target.tagName === 'AUDIO') {
+        playlistContainer.addEventListener("play", function(e) {
+            if (e.target.tagName === "AUDIO") {
                 const player = e.target;
                 const folderId = player.dataset.folderId;
                 const trackIndex = player.dataset.trackIndex;
@@ -285,17 +324,20 @@
                     player.dataset.hasCountedInSession = "true";
 
                     const statusLabel = document.getElementById(`track_status_${folderId}_${trackIndex}`);
-                    statusLabel.innerText = `Đã nghe: ${currentPlayed}/${limit} lần`;
 
-                    if (currentPlayed >= limit) {
-                        statusLabel.style.color = "#e65100";
+                    if (statusLabel) {
+                        statusLabel.innerText = `Đã nghe: ${currentPlayed}/${limit} lần`;
+
+                        if (currentPlayed >= limit) {
+                            statusLabel.style.color = "#e65100";
+                        }
                     }
                 }
             }
         }, true);
 
-        playlistContainer.addEventListener('ended', function(e) {
-            if (e.target.tagName === 'AUDIO') {
+        playlistContainer.addEventListener("ended", function(e) {
+            if (e.target.tagName === "AUDIO") {
                 const player = e.target;
                 const folderId = player.dataset.folderId;
                 const trackIndex = player.dataset.trackIndex;
@@ -307,8 +349,11 @@
 
                     if (currentPlayed >= limit) {
                         const statusLabel = document.getElementById(`track_status_${folderId}_${trackIndex}`);
-                        statusLabel.innerText = "❌ Đã hết lượt nghe";
-                        statusLabel.style.color = "#d32f2f";
+
+                        if (statusLabel) {
+                            statusLabel.innerText = "❌ Đã hết lượt nghe";
+                            statusLabel.style.color = "#d32f2f";
+                        }
 
                         player.removeAttribute("controls");
                         alert("Bài nghe đã kết thúc! Bạn đã dùng hết số lần nghe quy định. Trình phát đã bị khóa.");
@@ -328,25 +373,25 @@
         }
 
         for (const [sectionName, parts] of Object.entries(answerKey)) {
-            let sectionHtml = `<div class="exam-section"><h4>${sectionName}</h4>`;
+            let sectionHtml = `<div class="exam-section"><h4>${escapeHtml(sectionName)}</h4>`;
 
             for (const [partName, partData] of Object.entries(parts)) {
                 sectionHtml += `
                     <div class="exam-part">
                         <div class="exam-part-header">
-                            <h5>${partName}</h5>
-                            <span>${partData.num_questions} câu | ${partData.part_score} điểm</span>
+                            <h5>${escapeHtml(partName)}</h5>
+                            <span>${escapeHtml(partData.num_questions)} câu | ${escapeHtml(partData.part_score)} điểm</span>
                         </div>
                         <div class="question-grid">
                 `;
 
                 partData.questions.forEach(q => {
-                    const inputId = `ans_${sectionName}_${partName}_${q.qNum}`.replace(/\s+/g, '');
+                    const inputId = `ans_${sectionName}_${partName}_${q.qNum}`.replace(/\s+/g, "");
 
                     sectionHtml += `
                         <div class="question-row">
-                            <label>${q.qNum}</label>
-                            <input type="text" id="${inputId}" autocomplete="off" placeholder="...">
+                            <label>${escapeHtml(q.qNum)}</label>
+                            <input type="text" id="${escapeHtml(inputId)}" autocomplete="off" placeholder="...">
                         </div>
                     `;
                 });
@@ -355,7 +400,7 @@
             }
 
             sectionHtml += `</div>`;
-            container.innerHTML += sectionHtml;
+            container.insertAdjacentHTML("beforeend", sectionHtml);
         }
     }
 
@@ -375,6 +420,7 @@
         if (!confirm(`Bắt đầu bài thi "${activeExamData.title}"? Bạn chỉ được làm 1 lần.`)) return;
 
         document.getElementById("dashboard").style.display = "none";
+        document.getElementById("resultScreen").style.display = "none";
         document.getElementById("examRoom").style.display = "block";
         document.getElementById("activeExamTitle").innerText = activeExamData.title;
 
@@ -389,7 +435,7 @@
     }
 
     function startTimer(minutes) {
-        let timeRemaining = minutes * 60;
+        let timeRemaining = Number(minutes || 0) * 60;
         const timerDisplay = document.getElementById("countdownTimer");
 
         clearInterval(timerInterval);
@@ -398,7 +444,7 @@
         function renderTime() {
             const m = Math.floor(timeRemaining / 60);
             const s = timeRemaining % 60;
-            timerDisplay.innerText = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+            timerDisplay.innerText = `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
         }
 
         renderTime();
@@ -413,18 +459,21 @@
 
             if (timeRemaining <= 0) {
                 clearInterval(timerInterval);
-                submitExam();
+                submitExam(true);
             }
         }, 1000);
     }
 
-    async function submitExam() {
-        if (!activeExamData) return;
+    async function submitExam(isAutoSubmit = false) {
+        if (!activeExamData || isSubmitting) return;
 
-        if (!confirm("Bạn chắc chắn muốn nộp bài? Sau khi nộp sẽ không thể làm lại.")) {
-            return;
+        if (!isAutoSubmit) {
+            if (!confirm("Bạn chắc chắn muốn nộp bài? Sau khi nộp sẽ không thể làm lại.")) {
+                return;
+            }
         }
 
+        isSubmitting = true;
         clearInterval(timerInterval);
 
         document.querySelectorAll("#audioPlaylist audio").forEach(player => player.pause());
@@ -463,6 +512,8 @@
         } catch (error) {
             console.error(error);
             alert("Mất kết nối backend khi nộp bài.");
+        } finally {
+            isSubmitting = false;
         }
     }
 
@@ -470,23 +521,25 @@
         const tbody = document.getElementById("mistakeBody");
         tbody.innerHTML = "";
 
-        data.details.forEach(row => {
-            tbody.innerHTML += `
-                <tr>
-                    <td>${row.section} - ${row.part}</td>
-                    <td>Câu ${row.question}</td>
-                    <td>${row.student_answer || "(Trống)"}</td>
-                    <td class="correct-text">${row.correct_answer}</td>
-                    <td>${Number(row.earned_score || 0).toFixed(1)}</td>
-                    <td>
-                        ${row.is_correct
-                            ? `<span class="correct-text">✔ Đúng</span>`
-                            : `<span class="wrong-status">✘ Sai</span>`
-                        }
-                    </td>
-                </tr>
-            `;
-        });
+        if (Array.isArray(data.details)) {
+            data.details.forEach(row => {
+                tbody.insertAdjacentHTML("beforeend", `
+                    <tr>
+                        <td>${escapeHtml(row.section)} - ${escapeHtml(row.part)}</td>
+                        <td>Câu ${escapeHtml(row.question)}</td>
+                        <td>${escapeHtml(row.student_answer || "(Trống)")}</td>
+                        <td class="correct-text">${escapeHtml(row.correct_answer)}</td>
+                        <td>${Number(row.earned_score || 0).toFixed(1)}</td>
+                        <td>
+                            ${row.is_correct
+                                ? `<span class="correct-text">✔ Đúng</span>`
+                                : `<span class="wrong-status">✘ Sai</span>`
+                            }
+                        </td>
+                    </tr>
+                `);
+            });
+        }
 
         document.getElementById("examRoom").style.display = "none";
         document.getElementById("resultScreen").style.display = "block";
@@ -498,13 +551,20 @@
     function backToDashboard() {
         document.querySelectorAll("#audioPlaylist audio").forEach(player => player.pause());
 
+        clearInterval(timerInterval);
+
         document.getElementById("resultScreen").style.display = "none";
+        document.getElementById("examRoom").style.display = "none";
         document.getElementById("dashboard").style.display = "block";
         document.getElementById("pdfFrame").src = "";
+
+        const openPdfLink = document.getElementById("openPdfLink");
+        if (openPdfLink) openPdfLink.href = "#";
 
         currentPdfUrl = "";
         activeExamData = null;
         examStartTime = null;
+        isSubmitting = false;
 
         loadExamsForStudent();
     }

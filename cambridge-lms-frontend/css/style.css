@@ -1051,3 +1051,21 @@ button.submit-btn:hover,
         justify-content: flex-start;
     }
 }
+/* Bổ sung cho student.html - PDF R2 */
+.pdf-open-box {
+    padding: 8px 10px;
+    background: #f8f9fa;
+    border-top: 1px solid #ddd;
+    text-align: right;
+    font-size: 13px;
+}
+
+.pdf-open-box a {
+    color: #1565c0;
+    font-weight: bold;
+    text-decoration: none;
+}
+
+.pdf-open-box a:hover {
+    text-decoration: underline;
+}
