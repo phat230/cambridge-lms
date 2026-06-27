@@ -131,7 +131,47 @@ def build_public_url(storage_key: str) -> str:
     return f"{R2_PUBLIC_URL.rstrip('/')}/{storage_key}"
 
 
-async def upload_file_to_r2(file: UploadFile, storage_key: str) -> str:
+async def upload_file_to_r2(file: UploadFile, key: str) -> str:
+    check_r2_config()
+
+    try:
+        file.file.seek(0)
+
+        lower_key = key.lower()
+
+        if lower_key.endswith(".pdf"):
+            content_type = "application/pdf"
+            content_disposition = "inline"
+        elif lower_key.endswith(".mp3"):
+            content_type = "audio/mpeg"
+            content_disposition = "inline"
+        elif lower_key.endswith(".wav"):
+            content_type = "audio/wav"
+            content_disposition = "inline"
+        elif lower_key.endswith(".ogg"):
+            content_type = "audio/ogg"
+            content_disposition = "inline"
+        else:
+            content_type = file.content_type or "application/octet-stream"
+            content_disposition = "inline"
+
+        r2_client.upload_fileobj(
+            Fileobj=file.file,
+            Bucket=R2_BUCKET_NAME,
+            Key=key,
+            ExtraArgs={
+                "ContentType": content_type,
+                "ContentDisposition": content_disposition
+            }
+        )
+
+        return f"{R2_PUBLIC_URL.rstrip('/')}/{key}"
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Lỗi upload file: {str(e)}"
+        )    
     """Upload file lên Cloudflare R2 và trả về public URL."""
     check_r2_config()
 
