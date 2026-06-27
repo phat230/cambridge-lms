@@ -8,24 +8,17 @@
     <style>
         .delete-btn { background-color: #f44336; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; }
         .delete-btn:hover { background-color: #d32f2f; }
-        
-        /* Giao diện Ma trận cấu trúc chuyên sâu kiểu Azota */
         .azota-main-builder { background: #fdfdfd; border: 1px solid #e0e0e0; padding: 25px; border-radius: 8px; margin-top: 15px; }
         .section-block { background: #fff; border: 1px solid #cfd8dc; border-radius: 6px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
         .section-title-input { font-weight: bold; font-size: 18px; border: none; border-bottom: 2px solid #1976D2; outline: none; background: transparent; margin-bottom: 20px; width: 350px; color: #1976D2; padding-bottom: 5px; }
-        
-        /* Thẻ đại diện cho từng Part */
         .part-card { background: #f7f9fa; border: 1px dashed #b0bec5; border-radius: 6px; padding: 15px; margin-bottom: 15px; }
         .part-meta-row { display: flex; align-items: center; gap: 15px; flex-wrap: wrap; margin-bottom: 12px; }
         .part-title-input { font-weight: 600; font-size: 14px; width: 120px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
         .part-numeric-input { width: 90px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
-        
         .add-part-btn { background-color: #2196F3; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 13px; }
         .add-part-btn:hover { background-color: #1976D2; }
         .remove-part-btn { background-color: #78909c; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; margin-left: auto; }
         .remove-part-btn:hover { background-color: #546e7a; }
-
-        /* Lưới đáp án của từng Part */
         .part-questions-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; background: white; padding: 10px; border-radius: 4px; border: 1px solid #eceff1; min-height: 40px; }
         .answer-box { display: flex; align-items: center; border: 1px solid #b0bec5; background: white; border-radius: 4px; overflow: hidden; width: 110px; }
         .answer-box span { background: #cfd8dc; padding: 6px; font-weight: bold; border-right: 1px solid #b0bec5; font-size: 12px; min-width: 25px; text-align: center; color: #37474f; }
@@ -43,7 +36,6 @@
     </div>
 
     <div class="container" style="max-width: 1000px;">
-        
         <div class="step-section">
             <h3>Danh sách bài thi đã tạo</h3>
             <table class="exam-table">
@@ -80,6 +72,15 @@
                         <label>Thời gian làm bài (Phút):</label>
                         <input type="number" id="examDuration" required min="1" value="45">
                     </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label>Giới hạn lượt nghe Audio:</label>
+                        <select id="audioLimit" required>
+                            <option value="0">Cho nghe thoải mái</option>
+                            <option value="1">Chỉ được nghe 1 lần</option>
+                            <option value="2">Chỉ được nghe 2 lần</option>
+                            <option value="3">Chỉ được nghe 3 lần</option>
+                        </select>
+                    </div>
                 </div>
 
                 <div class="azota-main-builder">
@@ -113,8 +114,8 @@
                     <input type="file" id="pdfFile" accept="application/pdf" required>
                 </div>
                 <div class="form-group">
-                    <label>File Nghe (Chọn nhiều file cùng lúc từ thư mục CD):</label>
-                    <input type="file" id="audioFiles" accept="audio/*" multiple>
+                    <label>File Nghe (Vui lòng chọn <b>THƯ MỤC</b> chứa các file nhạc, VD thư mục CD1):</label>
+                    <input type="file" id="audioFiles" webkitdirectory directory multiple required>
                 </div>
                 <button type="submit" class="submit-btn" style="background-color: #2196F3;">Hoàn tất tải file lên</button>
                 <div id="uploadMessage" class="message"></div>
@@ -125,7 +126,7 @@
     <script>
         const API_URL = "http://127.0.0.1:8000";
         let currentCreatedExamId = null;
-        let partCounter = 0; // Biến tạo ID duy nhất cho mỗi Part card
+        let partCounter = 0;
 
         window.onload = function() {
             if (localStorage.getItem("role") !== "teacher") {
@@ -133,7 +134,6 @@
             } else {
                 document.getElementById("userEmailDisplay").innerText = "Giáo viên: " + localStorage.getItem("email");
                 loadExamList(); 
-                // Tự động tạo sẵn Part 1 cho cả 2 phần khi load trang cho tiện
                 addPartRow('listening');
                 addPartRow('reading');
             }
@@ -141,7 +141,6 @@
 
         function logout() { localStorage.clear(); window.location.href = "index.html"; }
 
-        // --- HÀM TỰ ĐỘNG THÊM MỘT PART CARD MỚI ---
         function addPartRow(sectionPrefix) {
             partCounter++;
             const container = document.getElementById(`${sectionPrefix}-parts-container`);
@@ -172,7 +171,6 @@
             if (card) card.remove();
         }
 
-        // --- LOGIC SINH LƯỚI ĐÁP ÁN CHO TỪNG PART ---
         function generateQuestionsGrid(partId) {
             const partCard = document.getElementById(partId);
             const qty = partCard.querySelector('.part-qty').value;
@@ -194,7 +192,6 @@
             }
         }
 
-        // --- GỬI TOÀN BỘ MA TRẬN ĐÁP ÁN LÊN BACKEND ---
         document.getElementById("createExamForm").addEventListener("submit", async function(e) {
             e.preventDefault();
             const msgDiv = document.getElementById("createMessage");
@@ -204,14 +201,12 @@
             const examStructure = {};
             let calculatedTotalScore = 0;
 
-            // Quét qua 2 phần lớn: Listening và Reading
             ['listening', 'reading'].forEach(prefix => {
                 const sectionTitle = document.getElementById(`${prefix}-title`).value;
                 const partCards = document.getElementById(`${prefix}-parts-container`).querySelectorAll('.part-card');
                 
                 if (partCards.length > 0) {
                     examStructure[sectionTitle] = {};
-                    
                     partCards.forEach(card => {
                         const partTitle = card.querySelector('.part-title-input').value;
                         const numQuestions = parseInt(card.querySelector('.part-qty').value) || 0;
@@ -239,8 +234,9 @@
                 title: document.getElementById("examTitle").value,
                 level: document.getElementById("examLevel").value,
                 duration_minutes: parseInt(document.getElementById("examDuration").value),
-                total_score: calculatedTotalScore, // Tự động cộng dồn điểm của các Part lại
-                answer_key: examStructure // Gửi object cấu hình lồng nhau lên DB
+                total_score: calculatedTotalScore,
+                audio_limit: parseInt(document.getElementById("audioLimit").value),
+                answer_key: examStructure 
             };
 
             try {
@@ -253,7 +249,7 @@
 
                 if (response.ok) {
                     msgDiv.style.color = "green";
-                    msgDiv.innerText = "Lưu ma trận đáp án chuẩn Azota thành công! Hãy làm tiếp Bước 2.";
+                    msgDiv.innerText = "Lưu cấu trúc đề thành công! Hãy làm tiếp Bước 2.";
                     document.getElementById("createExamForm").querySelectorAll("input, select, button").forEach(el => el.disabled = true);
                     currentCreatedExamId = data.exam_id;
                     document.getElementById("currentExamId").innerText = currentCreatedExamId;
@@ -266,7 +262,7 @@
             } catch (error) { msgDiv.style.color = "red"; msgDiv.innerText = "Mất kết nối backend."; }
         });
 
-        // --- TẢI FILE ĐỀ & ALBUM FILE NGHE ---
+        // --- CẬP NHẬT GỬI FILE VỚI CẤU TRÚC THƯ MỤC ---
         document.getElementById("uploadFilesForm").addEventListener("submit", async function(e) {
             e.preventDefault();
             const msgDiv = document.getElementById("uploadMessage");
@@ -274,12 +270,16 @@
             const audioFiles = document.getElementById("audioFiles").files;
 
             msgDiv.style.color = "blue";
-            msgDiv.innerText = "Đang tải dữ liệu lên Server...";
+            msgDiv.innerText = "Đang tải dữ liệu và cấu trúc thư mục lên Server...";
 
             const formData = new FormData();
             formData.append("pdf_file", pdfFile);
+            
             for (let i = 0; i < audioFiles.length; i++) {
-                formData.append("audio_files", audioFiles[i]);
+                const file = audioFiles[i];
+                // Lấy đường dẫn thư mục gốc thay vì chỉ lấy tên file
+                const filePath = file.webkitRelativePath ? file.webkitRelativePath : file.name;
+                formData.append("audio_files", file, filePath);
             }
 
             try {

@@ -14,7 +14,10 @@ class ExamSchema(BaseModel):
     
     total_score: float = Field(default=100.0, description="Tổng điểm của bài thi")
     
-    # BỔ SUNG QUAN TRỌNG NHẤT: Trường nhận ma trận đáp án từ giao diện Azota
+    # THÊM MỚI QUAN TRỌNG: Trường nhận cài đặt giới hạn lượt nghe từ giáo viên
+    audio_limit: int = Field(default=0, description="Giới hạn số lần nghe file âm thanh (0 là vô hạn)")
+    
+    # Trường nhận ma trận đáp án từ giao diện Azota
     answer_key: Optional[Dict[str, Any]] = Field(None, description="Cấu trúc ma trận đáp án chuẩn")
     
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -30,6 +33,7 @@ class ExamSchema(BaseModel):
                 "audio_file_url": "/uploads/audios/movers_test_2.mp3",
                 "audio_file_urls": ["/uploads/audios/cd1.mp3", "/uploads/audios/cd2.mp3"],
                 "total_score": 100.0,
+                "audio_limit": 2,
                 "answer_key": {
                     "Phần 1: Listening (Nghe)": {
                         "Part 1": {

@@ -150,12 +150,11 @@ async def delete_exam(exam_id: str):
         return {"message": "Đã xóa bài thi khỏi hệ thống"}
     
     raise HTTPException(status_code=404, detail="Không tìm thấy bài thi để xóa")
-
 @app.post("/exams/{exam_id}/upload-files/", response_description="Tải lên tài nguyên đề thi")
 async def upload_exam_files(
     exam_id: str,
     pdf_file: UploadFile = File(None, description="Đề thi định dạng PDF"),
-    audio_files: list[UploadFile] = File(None, description="Danh sách các file âm thanh bài nghe") # Nhận mảng file
+    audio_files: list[UploadFile] = File(None, description="Danh sách các file âm thanh bài nghe")
 ):
     if not ObjectId.is_valid(exam_id):
         raise HTTPException(status_code=400, detail="ID bài thi không hợp lệ")
@@ -169,24 +168,38 @@ async def upload_exam_files(
             shutil.copyfileobj(pdf_file.file, buffer)
         update_data["pdf_file_url"] = f"/uploads/pdfs/{exam_id}_{pdf_file.filename}"
 
-    # 2. Xử lý lặp qua để lưu album nhiều file âm thanh
+    # 2. Xử lý lưu album nhiều file âm thanh (CÓ BỘ LỌC FILE RÁC MACOS)
     if audio_files and len(audio_files) > 0 and audio_files[0].filename != "":
         saved_audio_urls = []
         for file in audio_files:
-            audio_path = f"uploads/audios/{exam_id}_{file.filename}"
+            # --- BỘ LỌC BẢO VỆ ---
+            # Bỏ qua ngay lập tức các thư mục __MACOSX và các file ẩn bắt đầu bằng '._'
+            if "__MACOSX" in file.filename or "/._" in file.filename or file.filename.startswith("._"):
+                continue
+            
+            # Chỉ cho phép các file thực sự là âm thanh đi qua
+            if not file.filename.lower().endswith(('.mp3', '.wav', '.ogg', '.m4a')):
+                continue
+            # ----------------------
+
+            safe_filename = file.filename.replace(" ", "_")
+            audio_path = f"uploads/audios/{exam_id}_{safe_filename}"
+            
+            os.makedirs(os.path.dirname(audio_path), exist_ok=True)
+            
             with open(audio_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
-            saved_audio_urls.append(f"/uploads/audios/{exam_id}_{file.filename}")
+                
+            saved_audio_urls.append(f"/uploads/audios/{exam_id}_{safe_filename}")
         
-        # Lưu mảng danh sách URL nhạc vào DB
-        update_data["audio_file_urls"] = saved_audio_urls
-        # Đồng thời lưu tạm file đầu tiên làm mặc định cho player ở frontend (tránh lỗi code cũ)
-        update_data["audio_file_url"] = saved_audio_urls[0]
+        # Chỉ cập nhật nếu thực sự có file hợp lệ được lưu
+        if len(saved_audio_urls) > 0:
+            update_data["audio_file_urls"] = saved_audio_urls
+            update_data["audio_file_url"] = saved_audio_urls[0]
 
     if not update_data:
         raise HTTPException(status_code=400, detail="Vui lòng lựa chọn tài liệu để tải lên")
 
-    # Cập nhật thông tin file vào bản ghi tương ứng trong MongoDB
     result = await exam_collection.update_one(
         {"_id": ObjectId(exam_id)},
         {"$set": update_data}
@@ -196,6 +209,6 @@ async def upload_exam_files(
         raise HTTPException(status_code=404, detail="Không tìm thấy mã đề thi trên hệ thống.")
 
     return {
-        "message": "Đồng bộ tài nguyên tệp tệp tin thành công!",
+        "message": "Đồng bộ tài nguyên tệp tin thành công!",
         "file_urls": update_data
     }
