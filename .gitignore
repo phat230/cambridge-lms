@@ -1,0 +1,18 @@
+Set-Content -Path .gitignore -Value @"
+# Loại bỏ thư mục môi trường ảo Python
+venv/
+.venv/
+env/
+
+# Loại bỏ các tệp môi trường bí mật
+.env
+*.env
+
+# Loại bỏ các tệp bộ nhớ đệm Python
+__pycache__/
+*.pyc
+
+# Loại bỏ các tệp phương tiện dung lượng lớn
+cambridge-lms-backend/uploads/pdfs/
+cambridge-lms-backend/uploads/audios/
+"@
