@@ -5,100 +5,79 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Khu Vực Học Sinh - Cambridge LMS</title>
     <link rel="stylesheet" href="css/style.css">
-    <style>
-        .exam-section { margin-bottom: 20px; border: 1px solid #e0e0e0; border-radius: 6px; padding: 15px; background: #fafafa; }
-        .exam-section h4 { margin-top: 0; color: #1976D2; border-bottom: 2px solid #e3f2fd; padding-bottom: 8px; }
-        .exam-part { margin-bottom: 15px; background: white; padding: 10px; border: 1px solid #eee; border-radius: 4px; }
-        .exam-part-header { display: flex; justify-content: space-between; margin-bottom: 10px; color: #555; }
-        .exam-part-header h5 { margin: 0; font-size: 15px; }
-        .exam-part-header span { font-size: 13px; font-weight: bold; color: #FF9800; }
-        .question-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
-        .question-row { display: flex; align-items: center; background: #f9fbfd; padding: 5px; border-radius: 4px; border: 1px solid #eceff1; }
-        .question-row label { width: 45px; font-weight: bold; font-size: 13px; color: #333; text-align: center; border-right: 1px solid #ccc; margin-right: 5px; }
-        .question-row input { flex-grow: 1; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; outline: none; text-transform: lowercase; }
-        .section-header td { background-color: #e3f2fd; color: #1565c0; font-size: 16px; padding: 10px; text-transform: uppercase; }
-        .part-header td { background-color: #f5f5f5; color: #666; font-size: 14px; font-weight: bold; }
-        .answer-sheet { overflow-y: auto; max-height: 75vh; }
-        .score-details { display: flex; justify-content: center; gap: 30px; margin-bottom: 20px; }
-        .score-box { background: #e8f5e9; padding: 15px 25px; border-radius: 8px; text-align: center; border: 2px solid #4CAF50; }
-        .score-box h3 { margin: 0 0 5px 0; color: #2e7d32; font-size: 28px; }
-        .score-box p { margin: 0; color: #555; font-weight: bold; }
-
-        /* CSS PLAYLIST ĐA THƯ MỤC KIỂU MỚI */
-        .playlist-container { background: #f4f6f8; border: 1px solid #cfd8dc; border-radius: 6px; padding: 15px; margin-bottom: 15px; }
-        .playlist-title { font-weight: bold; font-size: 15px; color: #2e7d32; margin-bottom: 12px; border-bottom: 1px solid #cfd8dc; padding-bottom: 5px; }
-        .playlist-folder-block { background: #fff; border: 1px solid #e0e0e0; border-left: 4px solid #4CAF50; padding: 12px; border-radius: 4px; margin-bottom: 15px; }
-        .folder-title-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-weight: bold; font-size: 14px; color: #333; }
-        
-        .audio-track-item { display: block; background: #fafafa; padding: 15px; border: 1px solid #e0e0e0; border-radius: 6px; margin-bottom: 12px; }
-        .track-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-        .track-info strong { font-size: 14px; color: #1565C0; }
-        .track-status { font-size: 12px; font-weight: bold; color: #666; background: #eee; padding: 4px 8px; border-radius: 12px; }
-    </style>
 </head>
 <body>
 
-    <div class="header">
-        <h2>Cambridge LMS - Dành cho Học sinh</h2>
-        <div>
-            <span id="userEmailDisplay" style="margin-right: 15px; font-weight: bold; color: #555;"></span>
-            <button class="logout-btn" onclick="logout()">Đăng Xuất</button>
+<div class="header">
+    <h2>Cambridge LMS - Dành cho Học sinh</h2>
+    <div>
+        <span id="userEmailDisplay" class="user-email"></span>
+        <button class="logout-btn" onclick="logout()">Đăng Xuất</button>
+    </div>
+</div>
+
+<div class="container" id="dashboard">
+    <h3>Danh sách bài thi hiện có</h3>
+    <div class="exam-grid" id="examGrid"></div>
+</div>
+
+<div class="container wide-container" id="examRoom">
+    <div class="exam-header-bar">
+        <h3 id="activeExamTitle">Tên bài thi</h3>
+        <div class="timer" id="countdownTimer">00:00</div>
+        <button class="submit-btn" onclick="submitExam()">Nộp Bài Ngay</button>
+    </div>
+
+    <div class="exam-workspace">
+        <div class="pdf-viewer-container">
+            <div class="pdf-controls">
+                <label for="pdfViewMode">Chế độ xem:</label>
+                <select id="pdfViewMode" onchange="changePdfView()">
+                    <option value="FitV">Cuộn dọc truyền thống</option>
+                    <option value="FitPage">Lật từng trang (Vừa màn hình)</option>
+                </select>
+            </div>
+            <iframe id="pdfFrame" src=""></iframe>
+        </div>
+
+        <div class="answer-sheet">
+            <div class="playlist-container">
+                <div class="playlist-title">🎵 Danh Sách File Âm Thanh</div>
+                <div id="audioPlaylist"></div>
+            </div>
+
+            <h4>Phiếu trả lời</h4>
+            <p class="hint-text">Điền đáp án vào các ô tương ứng bên dưới.</p>
+            <div id="dynamicAnswerSheet"></div>
+        </div>
+    </div>
+</div>
+
+<div class="container" id="resultScreen">
+    <div class="score-details">
+        <div class="score-box">
+            <h3 id="finalScoreDisplay">0</h3>
+            <p>Tổng điểm đạt được</p>
+        </div>
+
+        <div class="score-box blue-score-box">
+            <h3 id="correctCountDisplay">0 / 0</h3>
+            <p>Số câu trả lời đúng</p>
+        </div>
+
+        <div class="score-box orange-score-box">
+            <h3 id="timeSpentDisplay">0:00</h3>
+            <p>Thời gian làm bài</p>
         </div>
     </div>
 
-    <div class="container" id="dashboard" style="max-width: 1000px;">
-        <h3 style="color: #4CAF50; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-top: 0;">Danh sách bài thi hiện có</h3>
-        <div class="exam-grid" id="examGrid"></div>
-    </div>
+    <h3>Phân tích chi tiết từng phần:</h3>
 
-    <div class="container" id="examRoom" style="max-width: 1200px; padding: 20px; display: none;">
-        <div class="exam-header-bar">
-            <h3 id="activeExamTitle">Tên bài thi</h3>
-            <div class="timer" id="countdownTimer">00:00</div>
-            <button class="submit-btn" style="background-color: #4CAF50; margin-top: 0; width: auto;" onclick="submitExam()">Nộp Bài Ngay</button>
-        </div>
-
-        <div class="exam-workspace">
-            <div class="pdf-viewer-container" style="display: flex; flex-direction: column;">
-                <div class="pdf-controls">
-                    <label>Chế độ xem:</label>
-                    <select id="pdfViewMode" onchange="changePdfView()">
-                        <option value="FitV">Cuộn dọc truyền thống</option>
-                        <option value="FitPage">Lật từng trang (Vừa màn hình)</option>
-                    </select>
-                </div>
-                <iframe id="pdfFrame" src="" style="flex-grow: 1;"></iframe>
-            </div>
-
-            <div class="answer-sheet">
-                <div class="playlist-container">
-                    <div class="playlist-title">🎵 Danh Sách File Âm Thanh</div>
-                    <div id="audioPlaylist"></div>
-                </div>
-
-                <h4 style="margin-bottom: 5px;">Phiếu trả lời</h4>
-                <p style="font-size: 12px; color: #666; margin-top: 0; margin-bottom: 15px;">Điền đáp án vào các ô tương ứng bên dưới.</p>
-                <div id="dynamicAnswerSheet"></div>
-            </div>
-        </div>
-    </div>
-
-    <div class="container" id="resultScreen" style="display: none; max-width: 900px;">
-        <div class="score-details">
-            <div class="score-box">
-                <h3 id="finalScoreDisplay">0</h3>
-                <p>Tổng điểm đạt được</p>
-            </div>
-            <div class="score-box" style="background: #e3f2fd; border-color: #2196F3;">
-                <h3 id="correctCountDisplay" style="color: #1565c0;">0 / 0</h3>
-                <p>Số câu trả lời đúng</p>
-            </div>
-        </div>
-        
-        <h3 style="color: #333; border-bottom: 2px solid #ddd; padding-bottom: 10px;">Phân tích chi tiết từng phần:</h3>
+    <div class="table-wrap">
         <table class="mistake-list">
             <thead>
                 <tr>
+                    <th>Phần</th>
                     <th>Câu hỏi</th>
                     <th>Bạn trả lời</th>
                     <th>Đáp án đúng</th>
@@ -108,13 +87,15 @@
             </thead>
             <tbody id="mistakeBody"></tbody>
         </table>
-        <button class="submit-btn" style="margin-top: 20px; width: 100%;" onclick="backToDashboard()">Quay về Trang chủ</button>
     </div>
 
-    ```html
+    <button class="submit-btn full-width mt-20" onclick="backToDashboard()">Quay về Trang chủ</button>
+</div>
+
 <script>
     const API_URL = "https://cambridge-lms-1.onrender.com";
 
+    let examStartTime = null;
     let timerInterval;
     let currentPdfUrl = "";
     let examsDataList = [];
@@ -128,6 +109,13 @@
         }
 
         return `${API_URL}${url}`;
+    }
+
+    function formatTime(seconds) {
+        seconds = parseInt(seconds || 0);
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return `${m}:${s.toString().padStart(2, "0")}`;
     }
 
     window.onload = function() {
@@ -171,10 +159,36 @@
                 return;
             }
 
-            examsDataList.forEach(exam => {
-                const btnHtml = exam.pdf_file_url != null
-                    ? `<button class="take-exam-btn" onclick="startExam('${exam._id}')">Bắt đầu làm bài</button>`
-                    : `<button class="take-exam-btn" disabled>Chưa có đề</button>`;
+            const userId = localStorage.getItem("user_id");
+
+            for (const exam of examsDataList) {
+                let submittedData = { submitted: false };
+
+                try {
+                    const checkResponse = await fetch(`${API_URL}/exams/${exam._id}/my-submission/${userId}`);
+                    submittedData = await checkResponse.json();
+                } catch (e) {
+                    submittedData = { submitted: false };
+                }
+
+                let btnHtml = "";
+                let resultHtml = "";
+
+                if (!exam.pdf_file_url) {
+                    btnHtml = `<button class="take-exam-btn" disabled>Chưa có đề</button>`;
+                } else if (submittedData.submitted) {
+                    const sub = submittedData.submission;
+                    btnHtml = `<button class="take-exam-btn" disabled>Đã làm bài</button>`;
+                    resultHtml = `
+                        <div class="student-result-badge">
+                            Điểm: <strong>${sub.score}</strong> |
+                            Đúng: <strong>${sub.correct_count}/${sub.total_questions}</strong> |
+                            TG: <strong>${formatTime(sub.time_spent_seconds)}</strong>
+                        </div>
+                    `;
+                } else {
+                    btnHtml = `<button class="take-exam-btn" onclick="startExam('${exam._id}')">Bắt đầu làm bài</button>`;
+                }
 
                 grid.innerHTML += `
                     <div class="exam-card">
@@ -184,13 +198,14 @@
                             <p><strong>Thời gian:</strong> ${exam.duration_minutes} phút</p>
                             <p><strong>Tổng điểm:</strong> ${exam.total_score || 100}</p>
                         </div>
+                        ${resultHtml}
                         ${btnHtml}
                     </div>
                 `;
-            });
+            }
         } catch (error) {
             console.error(error);
-            document.getElementById("examGrid").innerHTML = "<p style='color:red;'>Không thể tải danh sách bài thi.</p>";
+            document.getElementById("examGrid").innerHTML = "<p class='danger-text'>Không thể tải danh sách bài thi.</p>";
         }
     }
 
@@ -199,7 +214,7 @@
         container.innerHTML = "";
 
         if (!activeExamData.audio_folders || activeExamData.audio_folders.length === 0) {
-            container.innerHTML = "<p style='color:#777; font-size:13px; font-style:italic;'>Bài thi này không có file âm thanh.</p>";
+            container.innerHTML = "<p class='hint-text'>Bài thi này không có file âm thanh.</p>";
             return;
         }
 
@@ -211,12 +226,12 @@
                 <div class="playlist-folder-block">
                     <div class="folder-title-bar">
                         <span>📁 Thư mục: ${folder.name}</span>
-                        <span style="color: #e65100; font-size:12px;">${limitText}</span>
+                        <span>${limitText}</span>
                     </div>
             `;
 
             if (!folder.tracks || folder.tracks.length === 0) {
-                folderHtml += `<p style="color:#aaa; font-size:12px; font-style:italic; padding-left:15px;">Thư mục trống.</p>`;
+                folderHtml += `<p class="hint-text">Thư mục trống.</p>`;
             } else {
                 folder.tracks.forEach((track, trackIndex) => {
                     const cleanTrackName = track.name.replace(/_/g, ' ');
@@ -231,14 +246,14 @@
                         <div class="audio-track-item">
                             <div class="track-info">
                                 <strong>${cleanTrackName}</strong>
-                                <span class="track-status" id="track_status_${folder.id}_${trackIndex}" style="${isTrackDisabled ? 'color: #d32f2f;' : ''}">
+                                <span class="track-status" id="track_status_${folder.id}_${trackIndex}">
                                     ${isTrackDisabled ? "❌ Hết lượt nghe" : statusText}
                                 </span>
                             </div>
 
                             ${isTrackDisabled ?
-                                `<div style="background: #ffebee; padding: 10px; border-radius: 4px; color: #c62828; font-size: 13px; text-align: center; border: 1px solid #ffcdd2;">Trình phát đã bị khóa do hết số lần nghe quy định.</div>` :
-                                `<audio controls controlsList="nodownload" src="${audioUrl}" style="width: 100%; height: 40px;"
+                                `<div class="locked-player">Trình phát đã bị khóa do hết số lần nghe quy định.</div>` :
+                                `<audio controls controlsList="nodownload" src="${audioUrl}"
                                     data-folder-id="${folder.id}" data-track-index="${trackIndex}" data-limit="${limit}"></audio>`
                             }
                         </div>
@@ -308,7 +323,7 @@
         container.innerHTML = "";
 
         if (!answerKey || Object.keys(answerKey).length === 0) {
-            container.innerHTML = "<p style='color:red;'>Bài thi này chưa được giáo viên cấu hình đáp án.</p>";
+            container.innerHTML = "<p class='danger-text'>Bài thi này chưa được giáo viên cấu hình đáp án.</p>";
             return;
         }
 
@@ -331,7 +346,7 @@
                     sectionHtml += `
                         <div class="question-row">
                             <label>${q.qNum}</label>
-                            <input type="text" id="${inputId}" data-section="${sectionName}" data-part="${partName}" data-qnum="${q.qNum}" autocomplete="off" placeholder="...">
+                            <input type="text" id="${inputId}" autocomplete="off" placeholder="...">
                         </div>
                     `;
                 });
@@ -357,7 +372,7 @@
             return;
         }
 
-        if (!confirm(`Bắt đầu bài thi "${activeExamData.title}"?`)) return;
+        if (!confirm(`Bắt đầu bài thi "${activeExamData.title}"? Bạn chỉ được làm 1 lần.`)) return;
 
         document.getElementById("dashboard").style.display = "none";
         document.getElementById("examRoom").style.display = "block";
@@ -368,6 +383,8 @@
 
         buildAudioPlaylist();
         buildAnswerSheet(activeExamData.answer_key);
+
+        examStartTime = Date.now();
         startTimer(activeExamData.duration_minutes);
     }
 
@@ -376,14 +393,19 @@
         const timerDisplay = document.getElementById("countdownTimer");
 
         clearInterval(timerInterval);
+        timerDisplay.classList.remove("danger");
+
+        function renderTime() {
+            const m = Math.floor(timeRemaining / 60);
+            const s = timeRemaining % 60;
+            timerDisplay.innerText = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        }
+
+        renderTime();
 
         timerInterval = setInterval(() => {
             timeRemaining--;
-
-            const m = Math.floor(timeRemaining / 60);
-            const s = timeRemaining % 60;
-
-            timerDisplay.innerText = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+            renderTime();
 
             if (timeRemaining <= 300) {
                 timerDisplay.classList.add("danger");
@@ -396,74 +418,81 @@
         }, 1000);
     }
 
-    function submitExam() {
+    async function submitExam() {
+        if (!activeExamData) return;
+
+        if (!confirm("Bạn chắc chắn muốn nộp bài? Sau khi nộp sẽ không thể làm lại.")) {
+            return;
+        }
+
         clearInterval(timerInterval);
 
         document.querySelectorAll("#audioPlaylist audio").forEach(player => player.pause());
 
-        let totalEarnedScore = 0;
-        let correctQuestionsCount = 0;
-        let totalQuestionsCount = 0;
+        const answers = {};
+        document.querySelectorAll("#dynamicAnswerSheet input").forEach(input => {
+            answers[input.id] = input.value.trim().toLowerCase();
+        });
 
+        const timeSpentSeconds = examStartTime
+            ? Math.floor((Date.now() - examStartTime) / 1000)
+            : 0;
+
+        try {
+            const response = await fetch(`${API_URL}/exams/${activeExamData._id}/submit`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    user_id: localStorage.getItem("user_id"),
+                    student_email: localStorage.getItem("email"),
+                    answers: answers,
+                    time_spent_seconds: timeSpentSeconds
+                })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                alert(data.detail || "Không thể nộp bài");
+                backToDashboard();
+                return;
+            }
+
+            showResultFromBackend(data);
+
+        } catch (error) {
+            console.error(error);
+            alert("Mất kết nối backend khi nộp bài.");
+        }
+    }
+
+    function showResultFromBackend(data) {
         const tbody = document.getElementById("mistakeBody");
         tbody.innerHTML = "";
 
-        if (!activeExamData.answer_key) {
-            alert("Đề thi này bị lỗi đáp án, vui lòng liên hệ giáo viên!");
-            backToDashboard();
-            return;
-        }
-
-        for (const [sectionName, parts] of Object.entries(activeExamData.answer_key)) {
-            tbody.innerHTML += `<tr class="section-header"><td colspan="5"><strong>${sectionName}</strong></td></tr>`;
-
-            for (const [partName, partData] of Object.entries(parts)) {
-                tbody.innerHTML += `<tr class="part-header"><td colspan="5">${partName} (Tổng: ${partData.part_score} điểm)</td></tr>`;
-
-                const pointsPerQuestion = partData.num_questions > 0
-                    ? partData.part_score / partData.num_questions
-                    : 0;
-
-                partData.questions.forEach(q => {
-                    totalQuestionsCount++;
-
-                    const inputId = `ans_${sectionName}_${partName}_${q.qNum}`.replace(/\s+/g, '');
-                    const inputElement = document.getElementById(inputId);
-                    const studentAns = inputElement ? inputElement.value.trim().toLowerCase() : "";
-                    const correctAnsText = q.answer.toLowerCase();
-
-                    if (studentAns === correctAnsText && studentAns !== "") {
-                        totalEarnedScore += pointsPerQuestion;
-                        correctQuestionsCount++;
-
-                        tbody.innerHTML += `
-                            <tr>
-                                <td>Câu ${q.qNum}</td>
-                                <td class="correct-text">${studentAns}</td>
-                                <td>${correctAnsText}</td>
-                                <td>+ ${pointsPerQuestion.toFixed(1)}</td>
-                                <td><span style="color: green;">✔ Đúng</span></td>
-                            </tr>
-                        `;
-                    } else {
-                        tbody.innerHTML += `
-                            <tr>
-                                <td>Câu ${q.qNum}</td>
-                                <td><span class="wrong-text">${studentAns || "(Trống)"}</span></td>
-                                <td class="correct-text">${correctAnsText}</td>
-                                <td>0</td>
-                                <td><span style="color: red;">✘ Sai</span></td>
-                            </tr>
-                        `;
-                    }
-                });
-            }
-        }
+        data.details.forEach(row => {
+            tbody.innerHTML += `
+                <tr>
+                    <td>${row.section} - ${row.part}</td>
+                    <td>Câu ${row.question}</td>
+                    <td>${row.student_answer || "(Trống)"}</td>
+                    <td class="correct-text">${row.correct_answer}</td>
+                    <td>${Number(row.earned_score || 0).toFixed(1)}</td>
+                    <td>
+                        ${row.is_correct
+                            ? `<span class="correct-text">✔ Đúng</span>`
+                            : `<span class="wrong-status">✘ Sai</span>`
+                        }
+                    </td>
+                </tr>
+            `;
+        });
 
         document.getElementById("examRoom").style.display = "none";
         document.getElementById("resultScreen").style.display = "block";
-        document.getElementById("finalScoreDisplay").innerText = totalEarnedScore.toFixed(2);
-        document.getElementById("correctCountDisplay").innerText = `${correctQuestionsCount} / ${totalQuestionsCount}`;
+        document.getElementById("finalScoreDisplay").innerText = Number(data.score || 0).toFixed(2);
+        document.getElementById("correctCountDisplay").innerText = `${data.correct_count} / ${data.total_questions}`;
+        document.getElementById("timeSpentDisplay").innerText = formatTime(data.time_spent_seconds || 0);
     }
 
     function backToDashboard() {
@@ -475,9 +504,11 @@
 
         currentPdfUrl = "";
         activeExamData = null;
+        examStartTime = null;
+
+        loadExamsForStudent();
     }
 </script>
-```
 
 </body>
 </html>

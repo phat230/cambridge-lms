@@ -1,6 +1,7 @@
 import os
-from motor.motor_asyncio import AsyncIOMotorClient
+
 from dotenv import load_dotenv
+from motor.motor_asyncio import AsyncIOMotorClient
 
 load_dotenv()
 
@@ -12,6 +13,7 @@ if not MONGODB_URL:
 
 client = AsyncIOMotorClient(MONGODB_URL)
 database = client[DATABASE_NAME]
+
 
 async def ping_database():
     try:

@@ -5,187 +5,164 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard Giáo Viên - Cambridge LMS</title>
     <link rel="stylesheet" href="css/style.css">
-    <style>
-        .delete-btn { background-color: #f44336; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; }
-        .delete-btn:hover { background-color: #d32f2f; }
-        .azota-main-builder { background: #fdfdfd; border: 1px solid #e0e0e0; padding: 25px; border-radius: 8px; margin-top: 15px; }
-        .section-block { background: #fff; border: 1px solid #cfd8dc; border-radius: 6px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
-        .section-title-input { font-weight: bold; font-size: 18px; border: none; border-bottom: 2px solid #1976D2; outline: none; background: transparent; margin-bottom: 20px; width: 350px; color: #1976D2; padding-bottom: 5px; }
-        .part-card { background: #f7f9fa; border: 1px dashed #b0bec5; border-radius: 6px; padding: 15px; margin-bottom: 15px; }
-        .part-meta-row { display: flex; align-items: center; gap: 15px; flex-wrap: wrap; margin-bottom: 12px; }
-        .part-title-input { font-weight: 600; font-size: 14px; width: 120px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
-        .part-numeric-input { width: 90px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
-        .add-part-btn { background-color: #2196F3; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 13px; }
-        .add-part-btn:hover { background-color: #1976D2; }
-        .remove-part-btn { background-color: #78909c; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; margin-left: auto; }
-        .remove-part-btn:hover { background-color: #546e7a; }
-        .part-questions-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; background: white; padding: 10px; border-radius: 4px; border: 1px solid #eceff1; min-height: 40px; }
-        .answer-box { display: flex; align-items: center; border: 1px solid #b0bec5; background: white; border-radius: 4px; overflow: hidden; width: 110px; }
-        .answer-box span { background: #cfd8dc; padding: 6px; font-weight: bold; border-right: 1px solid #b0bec5; font-size: 12px; min-width: 25px; text-align: center; color: #37474f; }
-        .answer-box input { border: none; padding: 6px; width: 100%; outline: none; font-size: 13px; text-transform: lowercase; }
-
-        /* CSS MỚI CHO TRÌNH QUẢN LÝ AUDIO */
-        .audio-manager { border: 2px solid #4CAF50; border-radius: 8px; padding: 20px; background: #f9fbe7; margin-top: 20px; }
-        
-        /* --- ĐÃ ĐIỀU CHỈNH: Ô TẠO THƯ MỤC RỘNG RÃI VÀ DÀI HƠN --- */
-        .folder-creator { 
-            display: flex; 
-            gap: 15px; 
-            align-items: center; 
-            margin-bottom: 20px; 
-            background: white; 
-            padding: 20px; 
-            border-radius: 8px; 
-            box-shadow: 0 2px 5px rgba(0,0,0,0.05); 
-            border: 1px solid #e0e0e0;
-        }
-
-        #newFolderName {
-            flex: 3;
-            min-width: 400px;
-            padding: 10px 12px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            font-size: 14px;
-            outline: none;
-            transition: all 0.3s;
-        }
-
-        #newFolderName:focus {
-            border-color: #4CAF50;
-            box-shadow: 0 0 5px rgba(76, 175, 80, 0.2);
-        }
-
-        .folder-creator select {
-            flex: 1;
-            min-width: 160px;
-            padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            font-size: 14px;
-            background: white;
-        }
-        
-        .folder-card { background: white; border: 1px solid #c8e6c9; border-radius: 6px; padding: 15px; margin-bottom: 15px; }
-        .folder-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 10px; }
-        .folder-header h4 { margin: 0; color: #2e7d32; display: flex; align-items: center; gap: 10px; }
-        .folder-limit-badge { background: #ff9800; color: white; font-size: 11px; padding: 3px 8px; border-radius: 12px; }
-        .track-list { list-style: none; padding: 0; margin: 0; }
-        .track-list li { display: flex; justify-content: space-between; padding: 8px; border-bottom: 1px dashed #eee; font-size: 13px; }
-        .track-list li:last-child { border-bottom: none; }
-        .upload-audio-box { display: flex; gap: 10px; margin-top: 15px; background: #f1f8e9; padding: 10px; border-radius: 4px; }
-    </style>
 </head>
 <body>
 
-    <div class="header">
-        <h2>Khu Vực Giáo Viên</h2>
-        <div>
-            <span id="userEmailDisplay" style="margin-right: 15px; font-weight: bold; color: #555;"></span>
-            <button class="logout-btn" onclick="logout()">Đăng Xuất</button>
-        </div>
+<div class="header">
+    <h2>Khu Vực Giáo Viên</h2>
+    <div>
+        <span id="userEmailDisplay" class="user-email"></span>
+        <button class="logout-btn" onclick="logout()">Đăng Xuất</button>
     </div>
+</div>
 
-    <div class="container" style="max-width: 1000px;">
-        <div class="step-section">
-            <h3>Danh sách bài thi đã tạo</h3>
+<div class="container wide-container">
+    <div class="step-section">
+        <h3>Danh sách bài thi đã tạo</h3>
+        <div class="table-wrap">
             <table class="exam-table">
                 <thead>
                     <tr>
                         <th>Tên bài thi</th>
                         <th>Cấp độ</th>
                         <th>Trạng thái PDF</th>
-                        <th>Audio Folders</th>
-                        <th>Thao tác</th> 
+                        <th>Audio</th>
+                        <th>Thao tác</th>
                     </tr>
                 </thead>
                 <tbody id="examListBody"></tbody>
             </table>
         </div>
+    </div>
 
-        <div class="step-section" id="createSection">
-            <h3>Bước 1: Cấu hình bài thi & Ma trận đáp án</h3>
-            <form id="createExamForm">
-                <div class="form-group">
-                    <label>Tên bài thi (VD: Starters Test 1):</label>
-                    <input type="text" id="examTitle" required placeholder="Nhập tên bộ đề...">
-                </div>
-                <div style="display: flex; gap: 15px;">
-                    <div class="form-group" style="flex: 1;">
-                        <label>Cấp độ:</label>
-                        <select id="examLevel" required>
-                            <option value="Starters">Starters</option>
-                            <option value="Movers">Movers</option>
-                            <option value="Flyers">Flyers</option>
-                        </select>
-                    </div>
-                    <div class="form-group" style="flex: 1;">
-                        <label>Thời gian làm bài (Phút):</label>
-                        <input type="number" id="examDuration" required min="1" value="45">
-                    </div>
-                </div>
+    <div class="step-section">
+        <h3>Kết quả làm bài của học sinh</h3>
 
-                <div class="azota-main-builder">
-                    <h4 style="margin-top: 0; color: #1565C0;">Cấu trúc các Phần & Điểm số (Chuẩn Azota)</h4>
-                    
-                    <div class="section-block">
-                        <input type="text" class="section-title-input" id="listening-title" value="Phần 1: Listening (Nghe)">
-                        <div id="listening-parts-container"></div>
-                        <button type="button" class="add-part-btn" onclick="addPartRow('listening')">+ Thêm Part cho phần Nghe</button>
-                    </div>
+        <div class="filter-row">
+            <div>
+                <label for="resultLevelFilter">Lọc cấp độ:</label>
+                <select id="resultLevelFilter" onchange="loadSubmissions()">
+                    <option value="all">Tất cả cấp độ</option>
+                    <option value="Starters">Starters</option>
+                    <option value="Movers">Movers</option>
+                    <option value="Flyers">Flyers</option>
+                </select>
+            </div>
 
-                    <div class="section-block">
-                        <input type="text" class="section-title-input" id="reading-title" value="Phần 2: Reading & Writing (Đọc Viết)">
-                        <div id="reading-parts-container"></div>
-                        <button type="button" class="add-part-btn" onclick="addPartRow('reading')">+ Thêm Part cho phần Đọc Viết</button>
-                    </div>
-                </div>
-
-                <button type="submit" class="submit-btn" style="margin-top: 25px; background-color: #4CAF50;">Lưu Cấu Trúc Đề & Chuyển sang Bước 2</button>
-                <div id="createMessage" class="message"></div>
-            </form>
+            <div>
+                <label for="resultExamFilter">Lọc bài thi:</label>
+                <select id="resultExamFilter" onchange="loadSubmissions()">
+                    <option value="all">Tất cả bài thi</option>
+                </select>
+            </div>
         </div>
 
-        <div class="step-section" id="uploadSection" style="display: none;">
-            <h3>Bước 2 & 3: Tải Tài Nguyên Cho Mã Đề: <span id="currentExamIdDisplay" style="color: #d32f2f;"></span></h3>
-            
-            <div style="background: white; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 20px;">
-                <h4 style="margin-top: 0; color: #1976D2;">Bước 2: Tải File Đề Thi (PDF)</h4>
-                <form id="uploadPdfForm" style="display: flex; gap: 10px; align-items: center;">
-                    <input type="file" id="pdfFile" accept="application/pdf" required style="flex: 1;">
-                    <button type="submit" class="submit-btn" style="width: auto; margin: 0; background-color: #2196F3;">Tải PDF lên</button>
-                </form>
-                <div id="pdfMessage" class="message" style="margin-top: 10px;"></div>
-            </div>
-
-            <div class="audio-manager">
-                <h4 style="margin-top: 0; color: #2e7d32; font-size: 18px;">Bước 3: Trình Quản Lý Audio (Thư mục & File Nghe)</h4>
-                <p style="font-size: 12px; color: #666; margin-bottom: 8px;">Tạo thư mục (VD: CD1) -> Đặt giới hạn lượt nghe cho thư mục đó -> Tải các file nhạc vào thư mục.</p>
-                
-                <div class="folder-creator">
-                    <input type="text" id="newFolderName" placeholder="Tên thư mục (VD: CD 1, Part 1...)" style="flex: 25;">
-                    <select id="newFolderLimit">
-                        <option value="0">Nghe vô hạn</option>
-                        <option value="1">Chỉ được nghe 1 lần</option>
-                        <option value="2">Chỉ được nghe 2 lần</option>
-                        <option value="3">Chỉ được nghe 3 lần</option>
-                    </select>
-                    <button type="button" class="submit-btn" style="width: auto; margin: 0;" onclick="createAudioFolder()">+ Tạo Thư Mục</button>
-                </div>
-
-                <div id="audioFoldersList">
-                    </div>
-            </div>
-            
-            <button class="submit-btn" style="margin-top: 20px; background-color: #607d8b;" onclick="window.location.reload()">Hoàn tất & Làm mới trang</button>
+        <div class="table-wrap">
+            <table class="exam-table">
+                <thead>
+                    <tr>
+                        <th>Hạng</th>
+                        <th>Học sinh</th>
+                        <th>Bài thi</th>
+                        <th>Cấp độ</th>
+                        <th>Số câu đúng</th>
+                        <th>Điểm</th>
+                        <th>Thời gian</th>
+                        <th>Ngày nộp</th>
+                    </tr>
+                </thead>
+                <tbody id="submissionListBody"></tbody>
+            </table>
         </div>
     </div>
 
+    <div class="step-section" id="createSection">
+        <h3>Bước 1: Cấu hình bài thi & Ma trận đáp án</h3>
+
+        <form id="createExamForm">
+            <div class="form-group">
+                <label for="examTitle">Tên bài thi (VD: Starters Test 1):</label>
+                <input type="text" id="examTitle" required placeholder="Nhập tên bộ đề...">
+            </div>
+
+            <div class="two-col">
+                <div class="form-group">
+                    <label for="examLevel">Cấp độ:</label>
+                    <select id="examLevel" required>
+                        <option value="Starters">Starters</option>
+                        <option value="Movers">Movers</option>
+                        <option value="Flyers">Flyers</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="examDuration">Thời gian làm bài (Phút):</label>
+                    <input type="number" id="examDuration" required min="1" value="45">
+                </div>
+            </div>
+
+            <div class="azota-main-builder">
+                <h4>Cấu trúc các Phần & Điểm số</h4>
+
+                <div class="section-block">
+                    <input type="text" class="section-title-input" id="listening-title" value="Phần 1: Listening (Nghe)">
+                    <div id="listening-parts-container"></div>
+                    <button type="button" class="add-part-btn" onclick="addPartRow('listening')">+ Thêm Part cho phần Nghe</button>
+                </div>
+
+                <div class="section-block">
+                    <input type="text" class="section-title-input" id="reading-title" value="Phần 2: Reading & Writing (Đọc Viết)">
+                    <div id="reading-parts-container"></div>
+                    <button type="button" class="add-part-btn" onclick="addPartRow('reading')">+ Thêm Part cho phần Đọc Viết</button>
+                </div>
+            </div>
+
+            <button type="submit" class="submit-btn mt-20">Lưu Cấu Trúc Đề & Chuyển Sang Tải File</button>
+            <div id="createMessage" class="message"></div>
+        </form>
+    </div>
+
+    <div class="step-section" id="uploadSection">
+        <h3>Quản lý file cho bài thi: <span id="currentExamIdDisplay" class="danger-text"></span></h3>
+        <p id="currentExamTitleDisplay" class="hint-text"></p>
+
+        <div class="resource-box">
+            <h4>Bước 2: Tải hoặc thay File Đề Thi (PDF)</h4>
+            <form id="uploadPdfForm" class="inline-form">
+                <input type="file" id="pdfFile" accept="application/pdf" required>
+                <button type="submit" class="submit-btn blue-btn">Tải / Thay PDF</button>
+            </form>
+            <div id="pdfMessage" class="message"></div>
+        </div>
+
+        <div class="audio-manager">
+            <h4>Bước 3: Trình Quản Lý Audio</h4>
+            <p class="hint-text">Tạo thư mục, đặt giới hạn lượt nghe, tải audio. Khi xóa/thay audio, file cũ trên Cloudinary cũng bị xóa.</p>
+
+            <div class="folder-creator">
+                <input type="text" id="newFolderName" placeholder="Tên thư mục (VD: CD 1, Part 1...)">
+                <select id="newFolderLimit">
+                    <option value="0">Nghe vô hạn</option>
+                    <option value="1">Chỉ được nghe 1 lần</option>
+                    <option value="2">Chỉ được nghe 2 lần</option>
+                    <option value="3">Chỉ được nghe 3 lần</option>
+                </select>
+                <button type="button" class="submit-btn" onclick="createAudioFolder()">+ Tạo Thư Mục</button>
+            </div>
+
+            <div id="audioFoldersList"></div>
+        </div>
+
+        <button class="submit-btn gray-btn mt-20" onclick="resetCreateForm()">Tạo bài thi mới</button>
+    </div>
+</div>
 
 <script>
     const API_URL = "https://cambridge-lms-1.onrender.com";
+
     let currentExamId = null;
     let partCounter = 0;
+    let cachedExams = [];
 
     window.onload = function() {
         if (localStorage.getItem("role") !== "teacher") {
@@ -193,6 +170,7 @@
         } else {
             document.getElementById("userEmailDisplay").innerText = "Giáo viên: " + localStorage.getItem("email");
             loadExamList();
+            loadSubmissions();
             addPartRow('listening');
             addPartRow('reading');
         }
@@ -201,6 +179,17 @@
     function logout() {
         localStorage.clear();
         window.location.href = "index.html";
+    }
+
+    function resetCreateForm() {
+        window.location.reload();
+    }
+
+    function formatTime(seconds) {
+        seconds = parseInt(seconds || 0);
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return `${m} phút ${s.toString().padStart(2, "0")} giây`;
     }
 
     async function getApiError(response, defaultMessage) {
@@ -235,7 +224,7 @@
                 </div>
 
                 <div class="part-questions-grid" id="${partId}_grid">
-                    <span style="color:#aaa; font-size:13px; padding:5px;">Nhập số câu hỏi để sinh ô đáp án...</span>
+                    <span class="hint-text">Nhập số câu hỏi để sinh ô đáp án...</span>
                 </div>
             </div>
         `;
@@ -255,7 +244,7 @@
         gridContainer.innerHTML = "";
 
         if (!qty || qty <= 0) {
-            gridContainer.innerHTML = `<span style="color:#aaa; font-size:13px; padding:5px;">Nhập số câu hỏi để sinh ô đáp án...</span>`;
+            gridContainer.innerHTML = `<span class="hint-text">Nhập số câu hỏi để sinh ô đáp án...</span>`;
             return;
         }
 
@@ -330,7 +319,7 @@
 
             if (response.ok) {
                 msgDiv.style.color = "green";
-                msgDiv.innerText = "Đã lưu ma trận! Mở khóa khu vực tải file.";
+                msgDiv.innerText = "Đã lưu ma trận! Có thể tải PDF/audio.";
 
                 document.getElementById("createExamForm")
                     .querySelectorAll("input, select, button")
@@ -338,6 +327,7 @@
 
                 currentExamId = data.exam_id;
                 document.getElementById("currentExamIdDisplay").innerText = currentExamId;
+                document.getElementById("currentExamTitleDisplay").innerText = payload.title;
                 document.getElementById("uploadSection").style.display = "block";
 
                 loadExamList();
@@ -361,7 +351,7 @@
 
         if (!currentExamId) {
             msgDiv.style.color = "red";
-            msgDiv.innerText = "Bạn cần tạo bài thi trước khi upload PDF.";
+            msgDiv.innerText = "Bạn cần chọn hoặc tạo bài thi trước khi upload PDF.";
             return;
         }
 
@@ -385,7 +375,7 @@
 
             if (response.ok) {
                 msgDiv.style.color = "green";
-                msgDiv.innerText = "Tải PDF thành công!";
+                msgDiv.innerText = "Tải / thay PDF thành công!";
                 document.getElementById("pdfFile").value = "";
                 loadExamList();
             } else {
@@ -399,19 +389,127 @@
         }
     });
 
+    async function loadExamList() {
+        try {
+            const response = await fetch(`${API_URL}/exams/`);
+            const exams = await response.json();
+            cachedExams = exams;
+
+            const tbody = document.getElementById("examListBody");
+            tbody.innerHTML = "";
+
+            const resultExamFilter = document.getElementById("resultExamFilter");
+            const currentFilterValue = resultExamFilter.value;
+            resultExamFilter.innerHTML = `<option value="all">Tất cả bài thi</option>`;
+
+            exams.forEach(exam => {
+                resultExamFilter.innerHTML += `<option value="${exam._id}">${exam.title}</option>`;
+
+                const pdfStatus = exam.pdf_file_url
+                    ? `<span class="status-badge status-ok">Đã có PDF</span>`
+                    : `<span class="status-badge status-missing">Thiếu PDF</span>`;
+
+                const audioCount = exam.audio_folders ? exam.audio_folders.length : 0;
+
+                tbody.innerHTML += `
+                    <tr>
+                        <td><strong>${exam.title}</strong></td>
+                        <td>${exam.level}</td>
+                        <td>${pdfStatus}</td>
+                        <td>${audioCount} thư mục</td>
+                        <td>
+                            <div class="action-group">
+                                <button class="small-btn blue-btn" onclick="manageExamFiles('${exam._id}')">Quản lý file</button>
+                                ${exam.pdf_file_url ? `<button class="small-btn gray-btn" onclick="deletePdf('${exam._id}')">Xóa PDF</button>` : ""}
+                                <button class="small-btn delete-btn" onclick="deleteExam('${exam._id}')">Xóa toàn bộ</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            if ([...resultExamFilter.options].some(opt => opt.value === currentFilterValue)) {
+                resultExamFilter.value = currentFilterValue;
+            }
+
+            loadSubmissions();
+        } catch (error) {
+            console.error(error);
+        }
+    }
+
+    function manageExamFiles(examId) {
+        const exam = cachedExams.find(e => e._id === examId);
+        if (!exam) return;
+
+        currentExamId = examId;
+        document.getElementById("currentExamIdDisplay").innerText = currentExamId;
+        document.getElementById("currentExamTitleDisplay").innerText = exam.title;
+        document.getElementById("uploadSection").style.display = "block";
+        document.getElementById("uploadSection").scrollIntoView({ behavior: "smooth" });
+
+        reloadAudioFolders();
+    }
+
+    async function deleteExam(examId) {
+        if (!confirm("Xóa hoàn toàn bài thi này? PDF, audio trên Cloudinary và kết quả nộp bài liên quan cũng sẽ bị xóa.")) return;
+
+        try {
+            const response = await fetch(`${API_URL}/exams/${examId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                if (currentExamId === examId) {
+                    currentExamId = null;
+                    document.getElementById("uploadSection").style.display = "none";
+                }
+
+                await loadExamList();
+                await loadSubmissions();
+            } else {
+                alert(await getApiError(response, "Xóa bài thi thất bại"));
+            }
+        } catch (error) {
+            console.error(error);
+            alert("Lỗi hệ thống");
+        }
+    }
+
+    async function deletePdf(examId) {
+        if (!confirm("Xóa PDF của bài thi này? File PDF trên Cloudinary cũng sẽ bị xóa.")) return;
+
+        try {
+            const response = await fetch(`${API_URL}/exams/${examId}/pdf`, {
+                method: "DELETE"
+            });
+
+            if (response.ok) {
+                alert("Đã xóa PDF");
+                loadExamList();
+            } else {
+                alert(await getApiError(response, "Xóa PDF thất bại"));
+            }
+        } catch (error) {
+            console.error(error);
+            alert("Lỗi hệ thống");
+        }
+    }
+
     async function reloadAudioFolders() {
         if (!currentExamId) return;
 
         try {
             const response = await fetch(`${API_URL}/exams/`);
             const exams = await response.json();
+            cachedExams = exams;
             const currentExam = exams.find(e => e._id === currentExamId);
 
             const container = document.getElementById("audioFoldersList");
             container.innerHTML = "";
 
             if (!currentExam || !currentExam.audio_folders || currentExam.audio_folders.length === 0) {
-                container.innerHTML = "<p style='font-size: 13px; color: #888;'>Chưa có thư mục âm thanh nào. Hãy tạo thư mục ở trên.</p>";
+                container.innerHTML = "<p class='hint-text'>Chưa có thư mục âm thanh nào. Hãy tạo thư mục ở trên.</p>";
                 return;
             }
 
@@ -425,18 +523,23 @@
                         tracksHtml += `
                             <li>
                                 <span>${track.name}</span>
-                                <button class="remove-part-btn" style="padding: 2px 8px; font-size: 11px;" onclick="deleteTrack('${folder.id}', '${track.id}')">Xóa</button>
+                                <div class="track-actions">
+                                    <input type="file" id="replace_${track.id}" accept=".mp3,.wav,.ogg">
+                                    <button class="small-btn blue-btn" onclick="replaceTrack('${folder.id}', '${track.id}')">Thay</button>
+                                    <button class="small-btn delete-btn" onclick="deleteTrack('${folder.id}', '${track.id}')">Xóa</button>
+                                </div>
                             </li>
                         `;
                     });
                 } else {
-                    tracksHtml = "<li style='color: #999; font-style: italic;'>Thư mục trống. Hãy chọn file mp3, wav hoặc ogg tải lên.</li>";
+                    tracksHtml = "<li class='hint-text'>Thư mục trống. Hãy chọn file mp3, wav hoặc ogg tải lên.</li>";
                 }
 
                 const folderHtml = `
                     <div class="folder-card">
                         <div class="folder-header">
                             <h4>📁 ${folder.name} <span class="folder-limit-badge">${limitText}</span></h4>
+                            <button class="small-btn delete-btn" onclick="deleteFolder('${folder.id}')">Xóa thư mục</button>
                         </div>
 
                         <ul class="track-list">
@@ -444,8 +547,8 @@
                         </ul>
 
                         <div class="upload-audio-box">
-                            <input type="file" id="file_input_${folder.id}" accept=".mp3,.wav,.ogg" multiple style="font-size: 13px;">
-                            <button class="submit-btn" style="width: auto; margin:0; padding: 6px 12px; font-size: 12px;" onclick="uploadToFolder('${folder.id}')">Tải nhạc vào đây</button>
+                            <input type="file" id="file_input_${folder.id}" accept=".mp3,.wav,.ogg" multiple>
+                            <button class="submit-btn small-submit" onclick="uploadToFolder('${folder.id}')">Tải nhạc vào đây</button>
                         </div>
                     </div>
                 `;
@@ -463,7 +566,7 @@
         const limit = parseInt(document.getElementById("newFolderLimit").value);
 
         if (!currentExamId) {
-            alert("Bạn cần tạo bài thi trước.");
+            alert("Bạn cần chọn hoặc tạo bài thi trước.");
             return;
         }
 
@@ -482,12 +585,33 @@
             if (response.ok) {
                 document.getElementById("newFolderName").value = "";
                 reloadAudioFolders();
+                loadExamList();
             } else {
                 alert(await getApiError(response, "Lỗi khi tạo thư mục"));
             }
         } catch (error) {
             console.error(error);
             alert("Mất kết nối backend");
+        }
+    }
+
+    async function deleteFolder(folderId) {
+        if (!confirm("Xóa thư mục này? Tất cả audio bên trong và file trên Cloudinary cũng sẽ bị xóa.")) return;
+
+        try {
+            const response = await fetch(`${API_URL}/exams/${currentExamId}/audio-folders/${folderId}`, {
+                method: "DELETE"
+            });
+
+            if (response.ok) {
+                reloadAudioFolders();
+                loadExamList();
+            } else {
+                alert(await getApiError(response, "Xóa thư mục thất bại"));
+            }
+        } catch (error) {
+            console.error(error);
+            alert("Lỗi hệ thống");
         }
     }
 
@@ -523,8 +647,37 @@
         }
     }
 
+    async function replaceTrack(folderId, trackId) {
+        const fileInput = document.getElementById(`replace_${trackId}`);
+
+        if (!fileInput || fileInput.files.length === 0) {
+            alert("Vui lòng chọn file audio mới để thay.");
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append("audio_file", fileInput.files[0]);
+
+        try {
+            const response = await fetch(`${API_URL}/exams/${currentExamId}/audio-folders/${folderId}/tracks/${trackId}/replace`, {
+                method: "PUT",
+                body: formData
+            });
+
+            if (response.ok) {
+                alert("Đã thay audio thành công!");
+                reloadAudioFolders();
+            } else {
+                alert(await getApiError(response, "Thay audio thất bại"));
+            }
+        } catch (error) {
+            console.error(error);
+            alert("Lỗi hệ thống");
+        }
+    }
+
     async function deleteTrack(folderId, trackId) {
-        if (!confirm("Xóa bài nhạc này?")) return;
+        if (!confirm("Xóa bài nhạc này? File trên Cloudinary cũng sẽ bị xóa.")) return;
 
         try {
             const response = await fetch(`${API_URL}/exams/${currentExamId}/audio-folders/${folderId}/tracks/${trackId}`, {
@@ -542,58 +695,53 @@
         }
     }
 
-    async function loadExamList() {
-        try {
-            const response = await fetch(`${API_URL}/exams/`);
-            const exams = await response.json();
+    async function loadSubmissions() {
+        const level = document.getElementById("resultLevelFilter").value;
+        const examId = document.getElementById("resultExamFilter").value;
+        const tbody = document.getElementById("submissionListBody");
 
-            const tbody = document.getElementById("examListBody");
+        tbody.innerHTML = `<tr><td colspan="8">Đang tải...</td></tr>`;
+
+        try {
+            const params = new URLSearchParams();
+            params.set("level", level);
+            params.set("exam_id", examId);
+
+            const response = await fetch(`${API_URL}/teacher/submissions?${params.toString()}`);
+            const submissions = await response.json();
+
             tbody.innerHTML = "";
 
-            exams.forEach(exam => {
-                const pdfStatus = exam.pdf_file_url
-                    ? `<span class="status-badge status-ok">Đã có PDF</span>`
-                    : `<span class="status-badge status-missing">Thiếu PDF</span>`;
+            if (!submissions || submissions.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="8">Chưa có học sinh nào nộp bài.</td></tr>`;
+                return;
+            }
 
-                const audioCount = exam.audio_folders ? exam.audio_folders.length : 0;
+            submissions.forEach(item => {
+                const submittedAt = item.submitted_at
+                    ? new Date(item.submitted_at).toLocaleString("vi-VN")
+                    : "";
 
                 tbody.innerHTML += `
                     <tr>
-                        <td><strong>${exam.title}</strong></td>
-                        <td>${exam.level}</td>
-                        <td>${pdfStatus}</td>
-                        <td>${audioCount} thư mục</td>
-                        <td>
-                            <button class="delete-btn" onclick="deleteExam('${exam._id}')">Xóa toàn bộ</button>
-                        </td>
+                        <td><strong>#${item.rank}</strong></td>
+                        <td>${item.student_email || ""}</td>
+                        <td>${item.exam_title || ""}</td>
+                        <td>${item.exam_level || ""}</td>
+                        <td>${item.correct_count} / ${item.total_questions}</td>
+                        <td>${item.score}</td>
+                        <td>${formatTime(item.time_spent_seconds || 0)}</td>
+                        <td>${submittedAt}</td>
                     </tr>
                 `;
             });
+
         } catch (error) {
             console.error(error);
-        }
-    }
-
-    async function deleteExam(examId) {
-        if (!confirm("Xóa hoàn toàn bài thi này? PDF và audio trên Cloudinary cũng sẽ bị xóa nếu backend đã lưu public_id.")) return;
-
-        try {
-            const response = await fetch(`${API_URL}/exams/${examId}`, {
-                method: 'DELETE'
-            });
-
-            if (response.ok) {
-                loadExamList();
-            } else {
-                alert(await getApiError(response, "Xóa bài thi thất bại"));
-            }
-        } catch (error) {
-            console.error(error);
-            alert("Lỗi hệ thống");
+            tbody.innerHTML = `<tr><td colspan="8" class="danger-text">Không thể tải kết quả.</td></tr>`;
         }
     }
 </script>
-
 
 </body>
 </html>

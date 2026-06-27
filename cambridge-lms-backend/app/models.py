@@ -1,6 +1,8 @@
-from pydantic import BaseModel, EmailStr, Field, model_validator
-from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
+from typing import Optional, Dict, Any, List
+
+from pydantic import BaseModel, EmailStr, Field, model_validator
+
 
 class ExamSchema(BaseModel):
     title: str = Field(...)
@@ -15,6 +17,7 @@ class ExamSchema(BaseModel):
     class Config:
         populate_by_name = True
 
+
 class StudentRegister(BaseModel):
     email: EmailStr = Field(...)
     password: str = Field(..., min_length=6)
@@ -25,6 +28,7 @@ class StudentRegister(BaseModel):
         if self.password != self.confirm_password:
             raise ValueError("Mật khẩu nhập lại không khớp")
         return self
+
 
 class UserLogin(BaseModel):
     email: EmailStr = Field(...)
