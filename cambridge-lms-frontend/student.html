@@ -24,17 +24,16 @@
         .score-box h3 { margin: 0 0 5px 0; color: #2e7d32; font-size: 28px; }
         .score-box p { margin: 0; color: #555; font-weight: bold; }
 
-        /* CSS Danh sách nhạc nâng cao */
-        .playlist-container { background: #f4f6f8; border: 1px solid #cfd8dc; border-radius: 6px; padding: 12px; margin-bottom: 15px; }
-        .playlist-title { font-weight: bold; font-size: 14px; color: #37474f; margin-bottom: 8px; display: flex; justify-content: space-between; }
-        .audio-track-item { display: flex; align-items: center; justify-content: space-between; background: white; padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 4px; margin-bottom: 6px; cursor: pointer; transition: 0.2s; }
-        .audio-track-item:hover { background: #e3f2fd; border-color: #2196F3; }
-        .audio-track-item.active { background: #e3f2fd; border-color: #1976D2; font-weight: bold; }
-        .audio-track-item.disabled { background: #ffebee; border-color: #ffcdd2; cursor: not-allowed; color: #c62828; }
-        .track-info { font-size: 13px; display: flex; flex-direction: column; }
-        .track-status { font-size: 11px; font-weight: bold; margin-top: 2px; }
-        .play-btn-small { background: #4CAF50; color: white; border: none; padding: 4px 10px; border-radius: 4px; font-size: 12px; cursor: pointer; }
-        .audio-track-item.disabled .play-btn-small { background: #b0bec5; cursor: not-allowed; }
+        /* CSS PLAYLIST ĐA THƯ MỤC KIỂU MỚI */
+        .playlist-container { background: #f4f6f8; border: 1px solid #cfd8dc; border-radius: 6px; padding: 15px; margin-bottom: 15px; }
+        .playlist-title { font-weight: bold; font-size: 15px; color: #2e7d32; margin-bottom: 12px; border-bottom: 1px solid #cfd8dc; padding-bottom: 5px; }
+        .playlist-folder-block { background: #fff; border: 1px solid #e0e0e0; border-left: 4px solid #4CAF50; padding: 12px; border-radius: 4px; margin-bottom: 15px; }
+        .folder-title-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-weight: bold; font-size: 14px; color: #333; }
+        
+        .audio-track-item { display: block; background: #fafafa; padding: 15px; border: 1px solid #e0e0e0; border-radius: 6px; margin-bottom: 12px; }
+        .track-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .track-info strong { font-size: 14px; color: #1565C0; }
+        .track-status { font-size: 12px; font-weight: bold; color: #666; background: #eee; padding: 4px 8px; border-radius: 12px; }
     </style>
 </head>
 <body>
@@ -73,14 +72,9 @@
 
             <div class="answer-sheet">
                 <div class="playlist-container">
-                    <div class="playlist-title">
-                        <span>Danh sách Track âm thanh:</span>
-                        <span id="globalAudioLimitLabel" style="color:#d32f2f;"></span>
-                    </div>
+                    <div class="playlist-title">🎵 Danh Sách File Âm Thanh</div>
                     <div id="audioPlaylist"></div>
                 </div>
-
-                <audio id="audioPlayer" class="audio-player" controls controlsList="nodownload" style="display: none; width: 100%; margin-bottom: 15px;"></audio>
 
                 <h4 style="margin-bottom: 5px;">Phiếu trả lời</h4>
                 <p style="font-size: 12px; color: #666; margin-top: 0; margin-bottom: 15px;">Điền đáp án vào các ô tương ứng bên dưới.</p>
@@ -123,7 +117,6 @@
         let currentPdfUrl = "";
         let examsDataList = [];
         let activeExamData = null;
-        let isAudioTrackingPlay = false;
 
         window.onload = function() {
             if (localStorage.getItem("role") !== "student") {
@@ -131,7 +124,7 @@
             } else {
                 document.getElementById("userEmailDisplay").innerText = "Học viên: " + localStorage.getItem("email");
                 loadExamsForStudent();
-                setupAudioSecureListeners();
+                setupAudioSecureListeners(); // Kích hoạt bộ theo dõi lượt nghe
             }
         };
 
@@ -152,7 +145,7 @@
                 grid.innerHTML = "";
 
                 if(examsDataList.length === 0) {
-                    grid.innerHTML = "<p>Chưa có bài thi nào.</p>";
+                    grid.innerHTML = "<p>Chưa có bài thi nào hiện khả dụng.</p>";
                     return;
                 }
 
@@ -176,103 +169,124 @@
             } catch (error) { console.error(error); }
         }
 
+        // --- HÀM TẠO DANH SÁCH FILE NGHE VỚI THANH PHÁT TRỰC TIẾP ---
         function buildAudioPlaylist() {
             const container = document.getElementById("audioPlaylist");
             container.innerHTML = "";
-            const player = document.getElementById("audioPlayer");
-            player.style.display = "none";
-            player.src = "";
 
-            const urls = activeExamData.audio_file_urls || (activeExamData.audio_file_url ? [activeExamData.audio_file_url] : []);
-            const limit = activeExamData.audio_limit || 0;
-
-            document.getElementById("globalAudioLimitLabel").innerText = limit > 0 ? `Giới hạn: ${limit} lần nghe/file` : "Nghe tự do";
-
-            if (urls.length === 0) {
-                container.innerHTML = "<p style='color:#777; font-size:13px;'>Bài thi này không có tệp âm thanh nghe.</p>";
+            if (!activeExamData.audio_folders || activeExamData.audio_folders.length === 0) {
+                container.innerHTML = "<p style='color:#777; font-size:13px; font-style:italic;'>Bài thi này không có file âm thanh.</p>";
                 return;
             }
 
-            urls.forEach((url, index) => {
-                // Đổi ngược dấu '_' thành khoảng trắng để tên file hiển thị đẹp mắt
-                let displayFileName = url.split('/').pop().replace(`${activeExamData._id}_`, '').replace(/_/g, ' ');
+            activeExamData.audio_folders.forEach(folder => {
+                const limit = folder.limit || 0;
+                const limitText = limit > 0 ? `Giới hạn: ${limit} lần/file` : "Nghe tự do";
                 
-                const storageKey = `count_${activeExamData._id}_track_${index}`;
-                const currentPlayed = parseInt(localStorage.getItem(storageKey)) || 0;
-                
-                let isTrackDisabled = limit > 0 && currentPlayed >= limit;
-                let statusText = limit > 0 ? `Đã nghe: ${currentPlayed}/${limit} lần` : "Sẵn sàng";
-                if(isTrackDisabled) statusText = "❌ Đã hết lượt nghe";
-
-                const trackHtml = `
-                    <div class="audio-track-item ${isTrackDisabled ? 'disabled' : ''}" id="track_item_${index}" onclick="selectAudioTrack('${url}', ${index}, ${isTrackDisabled})">
-                        <div class="track-info">
-                            <strong>${displayFileName}</strong>
-                            <span class="track-status" id="track_status_${index}" style="color: ${isTrackDisabled ? '#d32f2f' : '#666'}">${statusText}</span>
+                let folderHtml = `
+                    <div class="playlist-folder-block">
+                        <div class="folder-title-bar">
+                            <span>📁 Thư mục: ${folder.name}</span>
+                            <span style="color: #e65100; font-size:12px;">${limitText}</span>
                         </div>
-                        <button class="play-btn-small" ${isTrackDisabled ? 'disabled' : ''}>Chọn phát</button>
-                    </div>
                 `;
-                container.insertAdjacentHTML('beforeend', trackHtml);
+
+                if(!folder.tracks || folder.tracks.length === 0) {
+                    folderHtml += `<p style="color:#aaa; font-size:12px; font-style:italic; padding-left:15px;">Thư mục trống.</p>`;
+                } else {
+                    folder.tracks.forEach((track, trackIndex) => {
+                        const cleanTrackName = track.name.replace(/_/g, ' ');
+                        const storageKey = `count_${activeExamData._id}_folder_${folder.id}_track_${trackIndex}`;
+                        const currentPlayed = parseInt(localStorage.getItem(storageKey)) || 0;
+
+                        let isTrackDisabled = limit > 0 && currentPlayed >= limit;
+                        let statusText = limit > 0 ? `Đã nghe: ${currentPlayed}/${limit} lần` : "Sẵn sàng";
+
+                        // Nhúng trực tiếp thanh <audio controls> vào HTML
+                        folderHtml += `
+                            <div class="audio-track-item">
+                                <div class="track-info">
+                                    <strong>${cleanTrackName}</strong>
+                                    <span class="track-status" id="track_status_${folder.id}_${trackIndex}" style="${isTrackDisabled ? 'color: #d32f2f;' : ''}">
+                                        ${isTrackDisabled ? "❌ Hết lượt nghe" : statusText}
+                                    </span>
+                                </div>
+                                ${isTrackDisabled ? 
+                                    `<div style="background: #ffebee; padding: 10px; border-radius: 4px; color: #c62828; font-size: 13px; text-align: center; border: 1px solid #ffcdd2;">Trình phát đã bị khóa do hết số lần nghe quy định.</div>` : 
+                                    `<audio controls controlsList="nodownload" src="${API_URL}${track.url}" style="width: 100%; height: 40px;" 
+                                            data-folder-id="${folder.id}" data-track-index="${trackIndex}" data-limit="${limit}"></audio>`
+                                }
+                            </div>
+                        `;
+                    });
+                }
+
+                folderHtml += `</div>`;
+                container.insertAdjacentHTML('beforeend', folderHtml);
             });
         }
 
-        function selectAudioTrack(url, index, isDisabled) {
-            if (isDisabled) {
-                alert("Bạn đã hết số lần nghe cho tệp tin âm thanh này!");
-                return;
-            }
-
-            document.querySelectorAll('.audio-track-item').forEach(el => el.classList.remove('active'));
-            document.getElementById(`track_item_${index}`).classList.add('active');
-
-            const player = document.getElementById("audioPlayer");
-            player.src = `${API_URL}${url}`;
-            player.style.display = "block";
-            
-            player.dataset.activeIndex = index;
-            isAudioTrackingPlay = true;
-        }
-
+        // --- BẢO MẬT: THEO DÕI VÀ KHÓA LƯỢT NGHE SAU KHI KẾT THÚC BÀI ---
         function setupAudioSecureListeners() {
-            const player = document.getElementById("audioPlayer");
+            const playlistContainer = document.getElementById("audioPlaylist");
             
-            player.addEventListener('play', function() {
-                const index = player.dataset.activeIndex;
-                const limit = activeExamData ? (activeExamData.audio_limit || 0) : 0;
-                
-                if (index !== undefined && limit > 0 && isAudioTrackingPlay) {
-                    const storageKey = `count_${activeExamData._id}_track_${index}`;
-                    let currentPlayed = parseInt(localStorage.getItem(storageKey)) || 0;
+            // 1. Khi học sinh bấm Play -> Đếm lượt nghe
+            playlistContainer.addEventListener('play', function(e) {
+                if (e.target.tagName === 'AUDIO') {
+                    const player = e.target;
+                    const folderId = player.dataset.folderId;
+                    const trackIndex = player.dataset.trackIndex;
+                    const limit = parseInt(player.dataset.limit) || 0;
                     
-                    currentPlayed++;
-                    localStorage.setItem(storageKey, currentPlayed);
-                    isAudioTrackingPlay = false; 
-
-                    const statusLabel = document.getElementById(`track_status_${index}`);
-                    if (currentPlayed >= limit) {
-                        statusLabel.innerText = "❌ Đã hết lượt nghe";
-                        statusLabel.style.color = "#d32f2f";
-                        const trackCard = document.getElementById(`track_item_${index}`);
-                        trackCard.classList.add('disabled');
-                        trackCard.querySelector('button').disabled = true;
+                    if (limit > 0 && !player.dataset.hasCountedInSession) {
+                        const storageKey = `count_${activeExamData._id}_folder_${folderId}_track_${trackIndex}`;
+                        let currentPlayed = parseInt(localStorage.getItem(storageKey)) || 0;
                         
-                        player.pause();
-                        player.src = "";
-                        player.style.display = "none";
-                        alert("Tệp tin âm thanh này đã chính thức đạt giới hạn phát nghe công khai!");
-                    } else {
+                        currentPlayed++;
+                        localStorage.setItem(storageKey, currentPlayed);
+                        player.dataset.hasCountedInSession = "true"; 
+
+                        const statusLabel = document.getElementById(`track_status_${folderId}_${trackIndex}`);
                         statusLabel.innerText = `Đã nghe: ${currentPlayed}/${limit} lần`;
+                        
+                        if (currentPlayed >= limit) {
+                            statusLabel.style.color = "#e65100";
+                        }
                     }
                 }
-            });
+            }, true);
+
+            // 2. Khi bài hát kết thúc (Ended) -> Khóa luôn nếu hết lượt
+            playlistContainer.addEventListener('ended', function(e) {
+                if (e.target.tagName === 'AUDIO') {
+                    const player = e.target;
+                    const folderId = player.dataset.folderId;
+                    const trackIndex = player.dataset.trackIndex;
+                    const limit = parseInt(player.dataset.limit) || 0;
+                    
+                    if (limit > 0) {
+                        const storageKey = `count_${activeExamData._id}_folder_${folderId}_track_${trackIndex}`;
+                        let currentPlayed = parseInt(localStorage.getItem(storageKey)) || 0;
+                        
+                        if (currentPlayed >= limit) {
+                            const statusLabel = document.getElementById(`track_status_${folderId}_${trackIndex}`);
+                            statusLabel.innerText = "❌ Đã hết lượt nghe";
+                            statusLabel.style.color = "#d32f2f";
+                            
+                            // Gỡ bỏ thanh công cụ để học sinh không bấm play lại được nữa
+                            player.removeAttribute("controls"); 
+                            alert("Bài nghe đã kết thúc! Bạn đã dùng hết số lần nghe quy định. Trình phát đã bị khóa.");
+                        }
+                    }
+                }
+            }, true);
         }
 
         function buildAnswerSheet(answerKey) {
             const container = document.getElementById("dynamicAnswerSheet");
             container.innerHTML = "";
             if (!answerKey || Object.keys(answerKey).length === 0) {
-                container.innerHTML = "<p style='color:red;'>Bài thi này chưa được cấu hình đáp án.</p>";
+                container.innerHTML = "<p style='color:red;'>Bài thi này chưa được giáo viên cấu hình đáp án.</p>";
                 return;
             }
             for (const [sectionName, parts] of Object.entries(answerKey)) {
@@ -321,7 +335,9 @@
 
         function submitExam() {
             clearInterval(timerInterval);
-            document.getElementById("audioPlayer").pause(); 
+            
+            // Tìm và tắt tất cả các trình phát nhạc đang mở khi nộp bài
+            document.querySelectorAll("#audioPlaylist audio").forEach(player => player.pause());
 
             let totalEarnedScore = 0;
             let correctQuestionsCount = 0;
@@ -365,10 +381,10 @@
         }
 
         function backToDashboard() {
+            document.querySelectorAll("#audioPlaylist audio").forEach(player => player.pause());
             document.getElementById("resultScreen").style.display = "none";
             document.getElementById("dashboard").style.display = "block";
             document.getElementById("pdfFrame").src = "";
-            document.getElementById("audioPlayer").src = "";
         }
     </script>
 </body>
