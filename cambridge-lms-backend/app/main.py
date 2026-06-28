@@ -13,7 +13,7 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import FastAPI, Body, HTTPException, status, UploadFile, File, Form
+from fastapi import FastAPI, Body, HTTPException, status, UploadFile, File, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from passlib.context import CryptContext
 from PIL import Image
@@ -41,6 +41,12 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 exam_collection = database.get_collection("exams")
 user_collection = database.get_collection("users")
 submission_collection = database.get_collection("submissions")
+
+# Trạng thái xử lý PDF tách trang.
+# Lưu trong RAM để frontend có thể hỏi tiến trình.
+# Nếu backend restart thì job đang chạy sẽ mất, lúc đó giáo viên upload lại PDF.
+pdf_processing_jobs = {}
+
 
 
 # ==========================================
@@ -197,6 +203,141 @@ async def upload_file_to_r2(file: UploadFile, key: str) -> str:
         raise HTTPException(status_code=500, detail=f"Lỗi upload file: {str(e)}")
 
 
+
+
+async def upload_path_to_r2(file_path: str, key: str, content_type: str, content_disposition: str = "inline") -> str:
+    check_r2_config()
+    try:
+        with open(file_path, "rb") as f:
+            r2_client.upload_fileobj(
+                Fileobj=f,
+                Bucket=R2_BUCKET_NAME,
+                Key=key,
+                ExtraArgs={
+                    "ContentType": content_type,
+                    "ContentDisposition": content_disposition,
+                },
+            )
+        return public_url_for_key(key)
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi upload R2: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi upload file: {str(e)}")
+
+
+async def render_pdf_pages_to_r2(pdf_path: str, exam_id: str, batch_id: str, job_id: str, zoom: float = 1.15, quality: int = 78) -> list[dict]:
+    """
+    Tách PDF thành ảnh từng trang và upload từng ảnh ngay lên R2.
+    Không giữ toàn bộ ảnh trong RAM để tránh crash khi PDF lớn.
+    """
+    pages = []
+    matrix = fitz.Matrix(zoom, zoom)
+
+    with fitz.open(pdf_path) as doc:
+        total_pages = len(doc)
+        pdf_processing_jobs[job_id]["total_pages"] = total_pages
+
+        for index, page in enumerate(doc, start=1):
+            pdf_processing_jobs[job_id]["stage"] = "rendering"
+            pdf_processing_jobs[job_id]["current_page"] = index
+            pdf_processing_jobs[job_id]["message"] = f"Đang tách trang {index}/{total_pages}..."
+
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+            buffer = io.BytesIO()
+            image.save(buffer, format="JPEG", quality=quality, optimize=True)
+            image_bytes = buffer.getvalue()
+
+            page_id = str(ObjectId())
+            storage_key = f"page-images/{exam_id}/{batch_id}/page_{index:03d}.jpg"
+
+            image_url = await upload_bytes_to_r2(image_bytes, storage_key, "image/jpeg")
+
+            pages.append({
+                "id": page_id,
+                "page_number": index,
+                "image_url": image_url,
+                "storage_key": storage_key,
+                "is_active": True,
+                "questions": [],
+                "audio_tracks": [],
+            })
+
+            pdf_processing_jobs[job_id]["uploaded_pages"] = index
+
+    return pages
+
+
+async def process_book_pdf_job(job_id: str, exam_id: str, tmp_path: str, filename: str):
+    """Xử lý PDF ở nền để tránh request bị timeout gây Failed to fetch."""
+    try:
+        exam_object_id = get_object_id(exam_id)
+        exam = await exam_collection.find_one({"_id": exam_object_id})
+        if not exam:
+            raise Exception("Không tìm thấy bài thi")
+
+        old_keys = all_page_storage_keys(exam)
+        safe_name = safe_filename(filename)
+        batch_id = job_id
+        original_pdf_key = f"books/{exam_id}/{batch_id}_{safe_name}"
+
+        pdf_processing_jobs[job_id].update({
+            "status": "processing",
+            "stage": "uploading_pdf",
+            "message": "Đang upload PDF gốc lên R2...",
+        })
+
+        book_pdf_url = await upload_path_to_r2(tmp_path, original_pdf_key, "application/pdf")
+
+        pdf_processing_jobs[job_id].update({
+            "stage": "rendering",
+            "message": "Đang tách PDF thành từng ảnh trang...",
+        })
+
+        pages = await render_pdf_pages_to_r2(tmp_path, exam_id, batch_id, job_id)
+
+        pdf_processing_jobs[job_id].update({
+            "stage": "saving",
+            "message": "Đang lưu danh sách trang vào MongoDB...",
+        })
+
+        await exam_collection.update_one(
+            {"_id": exam_object_id},
+            {"$set": {
+                "book_pdf_url": book_pdf_url,
+                "book_pdf_storage_key": original_pdf_key,
+                "book_pdf_name": filename,
+                "pages": pages,
+                "updated_at": datetime.now(timezone.utc),
+            }},
+        )
+
+        for key in old_keys:
+            await delete_file_from_r2(key)
+
+        pdf_processing_jobs[job_id].update({
+            "status": "done",
+            "stage": "done",
+            "message": f"Đã upload PDF và tách thành {len(pages)} trang.",
+            "page_count": len(pages),
+            "done_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    except Exception as e:
+        pdf_processing_jobs[job_id].update({
+            "status": "error",
+            "stage": "error",
+            "message": f"Lỗi tách PDF: {str(e)}",
+            "error": str(e),
+        })
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+
 def render_pdf_pages_to_jpegs(pdf_path: str, exam_id: str, zoom: float = 1.35, quality: int = 82) -> list[dict]:
     pages = []
     matrix = fitz.Matrix(zoom, zoom)
@@ -344,8 +485,16 @@ async def delete_exam(exam_id: str):
 # ==========================================
 # BOOK PDF → PAGE IMAGES
 # ==========================================
-@app.post("/exams/{exam_id}/upload-book-pdf/")
-async def upload_book_pdf(exam_id: str, pdf_file: UploadFile = File(...)):
+@app.post("/exams/{exam_id}/upload-book-pdf/", status_code=status.HTTP_202_ACCEPTED)
+async def upload_book_pdf(
+    exam_id: str,
+    background_tasks: BackgroundTasks,
+    pdf_file: UploadFile = File(...)
+):
+    """
+    Nhận PDF, lưu tạm, trả response ngay, rồi tách trang ở background.
+    Cách này tránh lỗi trình duyệt báo Failed to fetch khi file lớn xử lý quá lâu.
+    """
     exam_object_id = get_object_id(exam_id)
     exam = await exam_collection.find_one({"_id": exam_object_id})
     if not exam:
@@ -355,70 +504,60 @@ async def upload_book_pdf(exam_id: str, pdf_file: UploadFile = File(...)):
     if not filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Chỉ cho phép tải file PDF")
 
-    # Nếu upload sách mới, xóa sách/trang/audio cũ để không tốn dung lượng R2.
-    for key in all_page_storage_keys(exam):
-        await delete_file_from_r2(key)
+    check_r2_config()
 
-    safe_name = safe_filename(filename)
-    original_pdf_key = f"books/{exam_id}/{safe_name}"
+    job_id = str(ObjectId())
+    tmp_path = None
 
-    # Lưu tạm PDF ra /tmp để PyMuPDF tách trang.
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp_path = tmp.name
             pdf_file.file.seek(0)
             while True:
                 chunk = pdf_file.file.read(1024 * 1024)
                 if not chunk:
                     break
                 tmp.write(chunk)
-            tmp_path = tmp.name
 
-        # Upload PDF gốc để giáo viên có bản lưu trữ.
-        with open(tmp_path, "rb") as f:
-            pdf_bytes = f.read()
-        book_pdf_url = await upload_bytes_to_r2(pdf_bytes, original_pdf_key, "application/pdf")
+        pdf_processing_jobs[job_id] = {
+            "job_id": job_id,
+            "exam_id": exam_id,
+            "filename": filename,
+            "status": "queued",
+            "stage": "queued",
+            "message": "Đã nhận PDF. Đang chuẩn bị tách trang...",
+            "current_page": 0,
+            "uploaded_pages": 0,
+            "total_pages": 0,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
 
-        rendered_pages = render_pdf_pages_to_jpegs(tmp_path, exam_id)
-
-        pages = []
-        for item in rendered_pages:
-            image_url = await upload_bytes_to_r2(item["image_bytes"], item["storage_key"], "image/jpeg")
-            pages.append({
-                "id": item["id"],
-                "page_number": item["page_number"],
-                "image_url": image_url,
-                "storage_key": item["storage_key"],
-                "is_active": True,
-                "questions": [],
-                "audio_tracks": [],
-            })
-
-        await exam_collection.update_one(
-            {"_id": exam_object_id},
-            {"$set": {
-                "book_pdf_url": book_pdf_url,
-                "book_pdf_storage_key": original_pdf_key,
-                "book_pdf_name": filename,
-                "pages": pages,
-                "updated_at": datetime.now(timezone.utc),
-            }},
-        )
+        background_tasks.add_task(process_book_pdf_job, job_id, exam_id, tmp_path, filename)
 
         return {
-            "message": f"Đã upload PDF và tách thành {len(pages)} trang.",
-            "page_count": len(pages),
-            "book_pdf_url": book_pdf_url,
+            "message": "Đã nhận PDF. Hệ thống đang tách trang ở nền.",
+            "job_id": job_id,
+            "status": "queued",
         }
-    except HTTPException:
-        raise
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi tách PDF: {str(e)}")
-    finally:
         try:
-            if 'tmp_path' in locals() and os.path.exists(tmp_path):
+            if tmp_path and os.path.exists(tmp_path):
                 os.remove(tmp_path)
         except Exception:
             pass
+        raise HTTPException(status_code=500, detail=f"Lỗi nhận PDF: {str(e)}")
+
+
+@app.get("/jobs/{job_id}")
+async def get_processing_job(job_id: str):
+    job = pdf_processing_jobs.get(job_id)
+    if not job:
+        raise HTTPException(
+            status_code=404,
+            detail="Không tìm thấy tiến trình. Nếu backend vừa redeploy/restart, hãy upload lại PDF."
+        )
+    return job
 
 
 @app.get("/exams/{exam_id}/pages")

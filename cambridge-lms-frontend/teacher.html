@@ -206,33 +206,96 @@ document.getElementById("uploadBookForm").addEventListener("submit", async funct
         alert("Hãy chọn bài test trước.");
         return;
     }
-    const file = document.getElementById("bookPdfFile").files[0];
+
+    const fileInput = document.getElementById("bookPdfFile");
+    const submitButton = document.querySelector("#uploadBookForm button[type='submit']");
+    const file = fileInput.files[0];
     if (!file) return;
-    if (!confirm("Upload PDF mới sẽ xóa các trang/audio/câu hỏi cũ của bài này. Tiếp tục?")) return;
+
+    if (!confirm("Upload PDF mới sẽ thay bộ trang hiện tại sau khi tách xong. Tiếp tục?")) return;
 
     const msg = document.getElementById("uploadBookMessage");
     msg.style.color = "blue";
-    msg.innerText = "Đang upload và tách PDF thành từng trang. File lớn có thể mất vài phút...";
+    msg.innerText = "Đang upload PDF lên backend...";
 
     const formData = new FormData();
     formData.append("pdf_file", file);
 
     try {
+        submitButton.disabled = true;
+        submitButton.innerText = "Đang upload...";
+
         const response = await fetch(`${API_URL}/exams/${currentExam._id}/upload-book-pdf/`, {
             method: "POST",
             body: formData
         });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || "Upload PDF thất bại");
-        msg.style.color = "green";
-        msg.innerText = data.message;
-        document.getElementById("bookPdfFile").value = "";
-        await loadExams(currentExam._id);
+
+        let data = {};
+        try {
+            data = await response.json();
+        } catch (_) {}
+
+        if (!response.ok) {
+            throw new Error(data.detail || "Upload PDF thất bại");
+        }
+
+        fileInput.value = "";
+        msg.style.color = "blue";
+        msg.innerText = data.message || "Đã nhận PDF. Đang tách trang...";
+
+        if (data.job_id) {
+            await pollPdfJob(data.job_id, msg);
+        } else {
+            await loadExams(currentExam._id);
+        }
+
     } catch (err) {
         msg.style.color = "red";
-        msg.innerText = err.message;
+        msg.innerText = err.message === "Failed to fetch"
+            ? "Failed to fetch: Frontend không gọi được backend. Hãy kiểm tra API_URL, CORS FRONTEND_URL trên Render, backend có đang online không, và Render Logs."
+            : err.message;
+    } finally {
+        submitButton.disabled = false;
+        submitButton.innerText = "Upload & Tách trang";
     }
 });
+
+async function pollPdfJob(jobId, msgElement) {
+    let attempts = 0;
+    const maxAttempts = 240; // 240 x 3 giây = khoảng 12 phút
+
+    while (attempts < maxAttempts) {
+        attempts++;
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        const response = await fetch(`${API_URL}/jobs/${jobId}`);
+        const job = await response.json();
+
+        if (!response.ok) {
+            throw new Error(job.detail || "Không kiểm tra được tiến trình tách PDF");
+        }
+
+        msgElement.style.color = job.status === "error" ? "red" : "blue";
+        msgElement.innerText = job.message || "Đang xử lý PDF...";
+
+        if (job.total_pages) {
+            msgElement.innerText += ` (${job.uploaded_pages || job.current_page || 0}/${job.total_pages} trang)`;
+        }
+
+        if (job.status === "done") {
+            msgElement.style.color = "green";
+            msgElement.innerText = job.message || "Tách PDF thành công.";
+            await loadExams(currentExam._id);
+            return;
+        }
+
+        if (job.status === "error") {
+            throw new Error(job.message || "Tách PDF thất bại");
+        }
+    }
+
+    throw new Error("Tách PDF quá lâu. Hãy tải lại trang và kiểm tra danh sách trang hoặc xem Render Logs.");
+}
 
 async function loadExams(selectedId = null) {
     const response = await fetch(`${API_URL}/exams/`);
