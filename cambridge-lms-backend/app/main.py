@@ -121,17 +121,135 @@ def public_url_for_key(key: str) -> str:
     return f"{R2_PUBLIC_URL.rstrip('/')}/{quote(key, safe='/')}"
 
 
-def normalize_answer(value: str) -> str:
+NUMBER_WORDS = {
+    "zero": "0", "oh": "0", "o": "0",
+    "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+    "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
+    "eleven": "11", "twelve": "12", "thirteen": "13", "fourteen": "14",
+    "fifteen": "15", "sixteen": "16", "seventeen": "17", "eighteen": "18",
+    "nineteen": "19", "twenty": "20",
+}
+
+YES_ALIASES = {"yes", "y", "true", "t", "đúng", "dung", "co", "có"}
+NO_ALIASES = {"no", "n", "false", "f", "sai", "khong", "không"}
+TICK_ALIASES = {"✓", "✔", "tick", "check", "checked", "v", "yes", "true", "đúng", "dung"}
+CROSS_ALIASES = {"✗", "✘", "x", "cross", "no", "false", "sai"}
+VALID_QUESTION_TYPES = {"text", "single_choice", "multi_choice", "tick_cross", "yes_no", "manual"}
+
+
+def normalize_answer(value) -> str:
     value = str(value or "").strip().lower()
+    value = value.replace("’", "'").replace("‘", "'").replace("`", "'")
+    value = value.replace("–", "-").replace("—", "-")
     value = re.sub(r"\s+", " ", value)
+    # Bỏ dấu câu thừa ở đầu/cuối nhưng giữ chữ, số, khoảng trắng, dấu gạch nối và apostrophe.
+    value = re.sub(r"^[^\w✓✔✗✘]+|[^\w✓✔✗✘]+$", "", value, flags=re.UNICODE)
+
+    if value in NUMBER_WORDS:
+        return NUMBER_WORDS[value]
+    if value in YES_ALIASES:
+        return "yes"
+    if value in NO_ALIASES:
+        return "no"
+    if value in TICK_ALIASES:
+        return "✓"
+    if value in CROSS_ALIASES:
+        return "✗"
+
     return value
 
 
-def split_correct_answers(answer: str) -> list[str]:
-    raw = str(answer or "")
-    # Giáo viên có thể nhập nhiều đáp án đúng bằng dấu | hoặc /
-    parts = re.split(r"\s*(?:\||/)\s*", raw)
-    return [normalize_answer(p) for p in parts if normalize_answer(p)]
+def split_answer_values(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        raw_items = value
+    else:
+        # Giáo viên có thể nhập nhiều đáp án đúng bằng |, /, ; hoặc xuống dòng.
+        raw_items = re.split(r"\s*(?:\||/|;|\n)\s*", str(value))
+    return [str(item).strip() for item in raw_items if str(item).strip()]
+
+
+def normalized_answer_set(value) -> set[str]:
+    return {normalize_answer(item) for item in split_answer_values(value) if normalize_answer(item)}
+
+
+def canonicalize_question_type(question_type: str) -> str:
+    question_type = str(question_type or "text").strip().lower()
+    return question_type if question_type in VALID_QUESTION_TYPES else "text"
+
+
+def clean_options(options, question_type: str) -> list[str]:
+    if question_type == "yes_no":
+        return ["yes", "no"]
+    if question_type == "tick_cross":
+        return ["✓", "✗"]
+    if isinstance(options, list):
+        items = options
+    else:
+        items = re.split(r"\s*(?:,|\||/|;|\n)\s*", str(options or ""))
+    cleaned = []
+    for item in items:
+        item = str(item).strip()
+        if item and item not in cleaned:
+            cleaned.append(item)
+    if question_type == "single_choice" and not cleaned:
+        cleaned = ["A", "B", "C"]
+    return cleaned
+
+
+def build_question_from_payload(payload: dict, question_id: Optional[str] = None) -> dict:
+    number = str(payload.get("number", "")).strip()
+    answer = str(payload.get("answer", payload.get("correct_answer", ""))).strip()
+    score = float(payload.get("score", 1) or 1)
+    prompt = str(payload.get("prompt", "")).strip()
+    question_type = canonicalize_question_type(payload.get("question_type", "text"))
+    options = clean_options(payload.get("options", []), question_type)
+    accepted_answers = split_answer_values(payload.get("accepted_answers", []))
+
+    if not number:
+        raise HTTPException(status_code=400, detail="Thiếu số câu")
+    if question_type != "manual" and not answer:
+        raise HTTPException(status_code=400, detail="Thiếu đáp án đúng")
+    if score <= 0:
+        raise HTTPException(status_code=400, detail="Điểm phải lớn hơn 0")
+    if question_type in {"single_choice", "multi_choice"} and len(options) < 2:
+        raise HTTPException(status_code=400, detail="Câu chọn đáp án cần ít nhất 2 lựa chọn")
+
+    question = {
+        "id": question_id or str(ObjectId()),
+        "number": number,
+        "question_type": question_type,
+        "options": options,
+        "answer": answer,
+        "accepted_answers": accepted_answers,
+        "score": score,
+        "prompt": prompt,
+    }
+    return question
+
+
+def is_answer_correct(question: dict, student_value) -> bool:
+    question_type = canonicalize_question_type(question.get("question_type", "text"))
+    if question_type == "manual":
+        return False
+
+    correct_values = normalized_answer_set(question.get("answer", "")) | normalized_answer_set(question.get("accepted_answers", []))
+    if not correct_values:
+        return False
+
+    if question_type == "multi_choice":
+        student_set = normalized_answer_set(student_value)
+        return bool(student_set) and student_set == correct_values
+
+    student_answer = normalize_answer(student_value)
+    return bool(student_answer) and student_answer in correct_values
+
+
+def display_student_answer(value) -> str:
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value)
+    return str(value or "")
 
 
 def all_page_storage_keys(exam: dict) -> list[str]:
@@ -612,19 +730,7 @@ async def delete_page(exam_id: str, page_id: str):
 @app.post("/exams/{exam_id}/pages/{page_id}/questions")
 async def add_page_question(exam_id: str, page_id: str, payload: dict = Body(...)):
     exam_object_id = get_object_id(exam_id)
-    number = str(payload.get("number", "")).strip()
-    answer = str(payload.get("answer", "")).strip()
-    score = float(payload.get("score", 1) or 1)
-    prompt = str(payload.get("prompt", "")).strip()
-
-    if not number:
-        raise HTTPException(status_code=400, detail="Thiếu số câu")
-    if not answer:
-        raise HTTPException(status_code=400, detail="Thiếu đáp án đúng")
-    if score <= 0:
-        raise HTTPException(status_code=400, detail="Điểm phải lớn hơn 0")
-
-    question = {"id": str(ObjectId()), "number": number, "answer": answer, "score": score, "prompt": prompt}
+    question = build_question_from_payload(payload)
 
     result = await exam_collection.update_one(
         {"_id": exam_object_id, "pages.id": page_id},
@@ -638,15 +744,7 @@ async def add_page_question(exam_id: str, page_id: str, payload: dict = Body(...
 @app.put("/exams/{exam_id}/pages/{page_id}/questions/{question_id}")
 async def update_page_question(exam_id: str, page_id: str, question_id: str, payload: dict = Body(...)):
     exam_object_id = get_object_id(exam_id)
-    number = str(payload.get("number", "")).strip()
-    answer = str(payload.get("answer", "")).strip()
-    score = float(payload.get("score", 1) or 1)
-    prompt = str(payload.get("prompt", "")).strip()
-
-    if not number or not answer or score <= 0:
-        raise HTTPException(status_code=400, detail="Câu hỏi không hợp lệ")
-
-    new_question = {"id": question_id, "number": number, "answer": answer, "score": score, "prompt": prompt}
+    new_question = build_question_from_payload(payload, question_id=question_id)
 
     result = await exam_collection.update_one(
         {"_id": exam_object_id, "pages.id": page_id},
@@ -763,6 +861,8 @@ async def get_student_exam_view(exam_id: str):
                 "number": q.get("number"),
                 "score": q.get("score", 1),
                 "prompt": q.get("prompt", ""),
+                "question_type": canonicalize_question_type(q.get("question_type", "text")),
+                "options": clean_options(q.get("options", []), canonicalize_question_type(q.get("question_type", "text"))),
             })
             total_questions += 1
             total_score += float(q.get("score", 1) or 1)
@@ -828,22 +928,27 @@ async def submit_exam(exam_id: str, payload: dict = Body(...)):
         for q in page.get("questions", []):
             total_questions += 1
             qid = q.get("id")
-            student_answer = normalize_answer(answers.get(qid, ""))
-            correct_options = split_correct_answers(q.get("answer", ""))
-            is_correct = bool(student_answer) and student_answer in correct_options
+            raw_student_answer = answers.get(qid, "")
+            is_correct = is_answer_correct(q, raw_student_answer)
             score = float(q.get("score", 1) or 1)
             earned = score if is_correct else 0.0
             if is_correct:
                 correct_count += 1
                 total_score += earned
 
+            answer_display = q.get("answer", "")
+            accepted = split_answer_values(q.get("accepted_answers", []))
+            if accepted:
+                answer_display = f"{answer_display} | " + " | ".join(accepted)
+
             detail_rows.append({
                 "page_id": page.get("id"),
                 "page_number": page.get("page_number"),
                 "question_id": qid,
                 "question_number": q.get("number"),
-                "student_answer": student_answer,
-                "correct_answer": q.get("answer", ""),
+                "question_type": canonicalize_question_type(q.get("question_type", "text")),
+                "student_answer": display_student_answer(raw_student_answer),
+                "correct_answer": answer_display,
                 "is_correct": is_correct,
                 "earned_score": round(earned, 2),
                 "max_score": score,

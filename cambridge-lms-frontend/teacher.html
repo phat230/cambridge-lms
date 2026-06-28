@@ -382,6 +382,95 @@ function nextPage() {
     renderPageEditor();
 }
 
+
+function questionTypeLabel(type) {
+    const labels = {
+        text: "Điền từ / số",
+        single_choice: "Chọn 1 đáp án",
+        multi_choice: "Chọn nhiều đáp án",
+        tick_cross: "Tick / Cross",
+        yes_no: "Yes / No",
+        manual: "Tự luận / giáo viên tự chấm"
+    };
+    return labels[type] || labels.text;
+}
+
+function questionTypeSelectHtml(id, selected) {
+    const types = [
+        ["text", "Điền từ / số"],
+        ["single_choice", "Chọn 1 đáp án"],
+        ["multi_choice", "Chọn nhiều đáp án"],
+        ["tick_cross", "Tick / Cross"],
+        ["yes_no", "Yes / No"],
+        ["manual", "Tự luận / tự chấm"]
+    ];
+    return `
+        <select id="${id}" onchange="handleQuestionTypeChange('${id}')">
+            ${types.map(([value, label]) => `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`).join("")}
+        </select>
+    `;
+}
+
+function handleQuestionTypeChange(selectId) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+    let prefix = "";
+    if (selectId.startsWith("new_q_")) {
+        prefix = selectId.replace(/_type$/, "");
+    } else if (selectId.startsWith("q_")) {
+        prefix = selectId.replace(/_type$/, "");
+    }
+    const optionsInput = document.getElementById(`${prefix}_options`);
+    const answerInput = document.getElementById(`${prefix}_answer`);
+    const acceptedInput = document.getElementById(`${prefix}_accepted`);
+
+    if (select.value === "yes_no") {
+        if (optionsInput) optionsInput.value = "yes, no";
+        if (answerInput && !answerInput.value) answerInput.placeholder = "yes hoặc no";
+    } else if (select.value === "tick_cross") {
+        if (optionsInput) optionsInput.value = "✓, ✗";
+        if (answerInput && !answerInput.value) answerInput.placeholder = "✓ hoặc ✗";
+    } else if (select.value === "single_choice") {
+        if (optionsInput && !optionsInput.value) optionsInput.value = "A, B, C";
+        if (answerInput) answerInput.placeholder = "VD: A";
+    } else if (select.value === "multi_choice") {
+        if (optionsInput && !optionsInput.value) optionsInput.value = "A, B, C, D";
+        if (answerInput) answerInput.placeholder = "VD: A|C";
+    } else if (select.value === "text") {
+        if (answerInput) answerInput.placeholder = "VD: 6 hoặc six hoặc Sue";
+        if (acceptedInput) acceptedInput.placeholder = "Đáp án khác cũng đúng, VD: 6|six";
+    } else if (select.value === "manual") {
+        if (answerInput) answerInput.placeholder = "Có thể bỏ trống nếu tự chấm";
+    }
+}
+
+function optionsToText(options) {
+    return Array.isArray(options) ? options.join(", ") : String(options || "");
+}
+
+function acceptedToText(accepted) {
+    return Array.isArray(accepted) ? accepted.join(" | ") : String(accepted || "");
+}
+
+function parseOptionsText(value) {
+    return String(value || "")
+        .split(/[;,|/\n]/)
+        .map(item => item.trim())
+        .filter(Boolean);
+}
+
+function readQuestionPayload(prefix) {
+    return {
+        number: document.getElementById(`${prefix}_number`).value.trim(),
+        question_type: document.getElementById(`${prefix}_type`).value,
+        options: parseOptionsText(document.getElementById(`${prefix}_options`).value),
+        answer: document.getElementById(`${prefix}_answer`).value.trim(),
+        accepted_answers: document.getElementById(`${prefix}_accepted`).value.trim(),
+        score: Number(document.getElementById(`${prefix}_score`).value || 1),
+        prompt: document.getElementById(`${prefix}_prompt`).value.trim()
+    };
+}
+
 function renderPageEditor() {
     const editor = document.getElementById("pageEditor");
     const counter = document.getElementById("pageCounter");
@@ -414,15 +503,53 @@ function renderPageEditor() {
         </div>
     `).join("") || `<p class="hint-text">Trang này chưa có audio.</p>`;
 
-    const questionsHtml = (page.questions || []).map(q => `
-        <div class="question-edit-row">
-            <input type="text" id="q_number_${q.id}" value="${escapeHtml(q.number)}" placeholder="Câu">
-            <input type="text" id="q_answer_${q.id}" value="${escapeHtml(q.answer)}" placeholder="Đáp án đúng">
-            <input type="number" id="q_score_${q.id}" value="${escapeHtml(q.score || 1)}" min="0.1" step="0.1" placeholder="Điểm">
-            <button class="secondary-btn small-btn" onclick="updateQuestion('${page.id}', '${q.id}')">Lưu</button>
-            <button class="delete-btn small-btn" onclick="deleteQuestion('${page.id}', '${q.id}')">Xóa</button>
-        </div>
-    `).join("") || `<p class="hint-text">Trang này chưa có câu hỏi. Hãy thêm câu hỏi bên dưới.</p>`;
+    const questionsHtml = (page.questions || []).map(q => {
+        const type = q.question_type || "text";
+        return `
+            <div class="question-edit-card">
+                <div class="question-edit-header">
+                    <strong>Câu ${escapeHtml(q.number)}</strong>
+                    <span class="question-type-badge">${escapeHtml(questionTypeLabel(type))}</span>
+                </div>
+
+                <div class="question-edit-grid">
+                    <div>
+                        <label>Số câu</label>
+                        <input type="text" id="q_${q.id}_number" value="${escapeHtml(q.number)}" placeholder="VD: 1">
+                    </div>
+                    <div>
+                        <label>Loại câu</label>
+                        ${questionTypeSelectHtml(`q_${q.id}_type`, type)}
+                    </div>
+                    <div>
+                        <label>Điểm</label>
+                        <input type="number" id="q_${q.id}_score" value="${escapeHtml(q.score || 1)}" min="0.1" step="0.1">
+                    </div>
+                </div>
+
+                <label>Nội dung / ghi chú câu hỏi (không bắt buộc)</label>
+                <input type="text" id="q_${q.id}_prompt" value="${escapeHtml(q.prompt || '')}" placeholder="VD: Nhìn tranh và chọn đáp án đúng">
+
+                <label>Lựa chọn, dành cho câu chọn đáp án</label>
+                <input type="text" id="q_${q.id}_options" value="${escapeHtml(optionsToText(q.options))}" placeholder="VD: A, B, C hoặc A, B, C, D">
+
+                <label>Đáp án đúng</label>
+                <input type="text" id="q_${q.id}_answer" value="${escapeHtml(q.answer || '')}" placeholder="VD: A hoặc yes hoặc 6">
+
+                <label>Đáp án khác cũng tính đúng</label>
+                <input type="text" id="q_${q.id}_accepted" value="${escapeHtml(acceptedToText(q.accepted_answers))}" placeholder="VD: 6|six hoặc 7|seven; có thể bỏ trống">
+
+                <div class="question-help-text">
+                    Gợi ý: câu điền từ có thể nhập nhiều đáp án đúng bằng dấu <b>|</b>, ví dụ <b>6|six</b>. Hệ thống cũng tự hiểu six = 6, seven = 7, yes/no, ✓/✗.
+                </div>
+
+                <div class="question-actions">
+                    <button class="secondary-btn small-btn" onclick="updateQuestion('${page.id}', '${q.id}')">Lưu câu này</button>
+                    <button class="delete-btn small-btn" onclick="deleteQuestion('${page.id}', '${q.id}')">Xóa câu</button>
+                </div>
+            </div>
+        `;
+    }).join("") || `<p class="hint-text">Trang này chưa có câu hỏi. Hãy thêm câu hỏi bên dưới.</p>`;
 
     editor.innerHTML = `
         <div class="page-status-bar">
@@ -449,10 +576,37 @@ function renderPageEditor() {
 
                 <h4>Câu hỏi & đáp án đúng</h4>
                 <div class="question-edit-list">${questionsHtml}</div>
-                <form class="mini-form question-add-form" onsubmit="addQuestion(event, '${page.id}')">
-                    <input type="text" id="new_q_number_${page.id}" placeholder="Số câu, VD: 1" required>
-                    <input type="text" id="new_q_answer_${page.id}" placeholder="Đáp án đúng, VD: A hoặc cat" required>
-                    <input type="number" id="new_q_score_${page.id}" min="0.1" step="0.1" value="1" required>
+
+                <form class="question-add-card" onsubmit="addQuestion(event, '${page.id}')">
+                    <h4>+ Thêm câu hỏi trong trang này</h4>
+                    <div class="question-edit-grid">
+                        <div>
+                            <label>Số câu</label>
+                            <input type="text" id="new_q_${page.id}_number" placeholder="VD: 1" required>
+                        </div>
+                        <div>
+                            <label>Loại câu</label>
+                            ${questionTypeSelectHtml(`new_q_${page.id}_type`, "text")}
+                        </div>
+                        <div>
+                            <label>Điểm</label>
+                            <input type="number" id="new_q_${page.id}_score" min="0.1" step="0.1" value="1" required>
+                        </div>
+                    </div>
+
+                    <label>Nội dung / ghi chú câu hỏi</label>
+                    <input type="text" id="new_q_${page.id}_prompt" placeholder="Không bắt buộc">
+
+                    <label>Lựa chọn</label>
+                    <input type="text" id="new_q_${page.id}_options" placeholder="VD: A, B, C hoặc A, B, C, D">
+
+                    <label>Đáp án đúng</label>
+                    <input type="text" id="new_q_${page.id}_answer" placeholder="VD: A hoặc 6 hoặc six" required>
+
+                    <label>Đáp án khác cũng tính đúng</label>
+                    <input type="text" id="new_q_${page.id}_accepted" placeholder="VD: 6|six hoặc Sue|SUE; có thể bỏ trống">
+
+                    <p class="question-help-text">Nếu câu trả lời có thể viết bằng số hoặc chữ, nhập ví dụ: <b>6|six</b>. Với câu chọn đáp án, nhập lựa chọn như <b>A, B, C</b>.</p>
                     <button class="submit-btn small-btn" type="submit">+ Thêm câu</button>
                 </form>
             </div>
@@ -515,11 +669,8 @@ async function deletePageAudio(pageId, audioId) {
 
 async function addQuestion(e, pageId) {
     e.preventDefault();
-    const payload = {
-        number: document.getElementById(`new_q_number_${pageId}`).value.trim(),
-        answer: document.getElementById(`new_q_answer_${pageId}`).value.trim(),
-        score: Number(document.getElementById(`new_q_score_${pageId}`).value || 1)
-    };
+    const payload = readQuestionPayload(`new_q_${pageId}`);
+
     const response = await fetch(`${API_URL}/exams/${currentExam._id}/pages/${pageId}/questions`, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
@@ -530,11 +681,8 @@ async function addQuestion(e, pageId) {
 }
 
 async function updateQuestion(pageId, questionId) {
-    const payload = {
-        number: document.getElementById(`q_number_${questionId}`).value.trim(),
-        answer: document.getElementById(`q_answer_${questionId}`).value.trim(),
-        score: Number(document.getElementById(`q_score_${questionId}`).value || 1)
-    };
+    const payload = readQuestionPayload(`q_${questionId}`);
+
     const response = await fetch(`${API_URL}/exams/${currentExam._id}/pages/${pageId}/questions/${questionId}`, {
         method: "PUT",
         headers: {"Content-Type": "application/json"},

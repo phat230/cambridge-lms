@@ -106,6 +106,90 @@ function formatTime(seconds) {
     return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+
+function normalizeChoiceValue(value) {
+    return String(value ?? "");
+}
+
+function questionTypeLabel(type) {
+    const labels = {
+        text: "Điền từ / số",
+        single_choice: "Chọn 1 đáp án",
+        multi_choice: "Chọn nhiều đáp án",
+        tick_cross: "Tick / Cross",
+        yes_no: "Yes / No",
+        manual: "Tự luận"
+    };
+    return labels[type] || labels.text;
+}
+
+function getQuestionOptions(q) {
+    const type = q.question_type || "text";
+    if (type === "yes_no") return ["yes", "no"];
+    if (type === "tick_cross") return ["✓", "✗"];
+    if (Array.isArray(q.options) && q.options.length) return q.options;
+    if (type === "single_choice") return ["A", "B", "C"];
+    if (type === "multi_choice") return ["A", "B", "C", "D"];
+    return [];
+}
+
+function renderAnswerControl(q) {
+    const qid = q.id;
+    const type = q.question_type || "text";
+    const current = answers[qid];
+    const prompt = q.prompt ? `<div class="question-prompt">${escapeHtml(q.prompt)}</div>` : "";
+
+    if (type === "single_choice" || type === "yes_no" || type === "tick_cross") {
+        const options = getQuestionOptions(q);
+        return `
+            ${prompt}
+            <div class="student-choice-group" data-question-id="${escapeHtml(qid)}" data-question-type="${escapeHtml(type)}">
+                ${options.map((opt, index) => {
+                    const checked = String(current || "") === String(opt) ? "checked" : "";
+                    return `
+                        <label class="choice-pill">
+                            <input class="student-answer-control" type="radio" name="answer_${escapeHtml(qid)}" value="${escapeHtml(opt)}" ${checked}>
+                            <span>${escapeHtml(opt)}</span>
+                        </label>
+                    `;
+                }).join("")}
+            </div>
+        `;
+    }
+
+    if (type === "multi_choice") {
+        const options = getQuestionOptions(q);
+        const currentList = Array.isArray(current) ? current.map(String) : [];
+        return `
+            ${prompt}
+            <div class="student-choice-group" data-question-id="${escapeHtml(qid)}" data-question-type="multi_choice">
+                ${options.map(opt => {
+                    const checked = currentList.includes(String(opt)) ? "checked" : "";
+                    return `
+                        <label class="choice-pill">
+                            <input class="student-answer-control" type="checkbox" name="answer_${escapeHtml(qid)}" value="${escapeHtml(opt)}" ${checked}>
+                            <span>${escapeHtml(opt)}</span>
+                        </label>
+                    `;
+                }).join("")}
+            </div>
+        `;
+    }
+
+    if (type === "manual") {
+        return `
+            ${prompt}
+            <textarea class="student-answer-input student-answer-control" data-question-id="${escapeHtml(qid)}" data-question-type="manual" placeholder="Nhập câu trả lời...">${escapeHtml(current || "")}</textarea>
+        `;
+    }
+
+    return `
+        ${prompt}
+        <input class="student-answer-input student-answer-control" data-question-id="${escapeHtml(qid)}" data-question-type="text" type="text" value="${escapeHtml(current || '')}" placeholder="Nhập đáp án..." autocomplete="off">
+        <div class="question-help-text">Có thể nhập số hoặc chữ nếu câu đó cho phép, ví dụ: 6 hoặc six.</div>
+    `;
+}
+
 async function loadExamsForStudent() {
     const grid = document.getElementById("examGrid");
     grid.innerHTML = "Đang tải...";
@@ -191,8 +275,26 @@ async function startExam(examId) {
 }
 
 function saveCurrentPageAnswers() {
-    document.querySelectorAll(".student-answer-input").forEach(input => {
-        answers[input.dataset.questionId] = input.value.trim();
+    if (!studentPages[currentPageIndex]) return;
+    const page = studentPages[currentPageIndex];
+
+    (page.questions || []).forEach(q => {
+        const type = q.question_type || "text";
+        const qid = q.id;
+
+        if (type === "single_choice" || type === "yes_no" || type === "tick_cross") {
+            const checked = document.querySelector(`input[name="answer_${CSS.escape(qid)}"]:checked`);
+            answers[qid] = checked ? checked.value : "";
+            return;
+        }
+
+        if (type === "multi_choice") {
+            answers[qid] = Array.from(document.querySelectorAll(`input[name="answer_${CSS.escape(qid)}"]:checked`)).map(input => input.value);
+            return;
+        }
+
+        const input = document.querySelector(`[data-question-id="${CSS.escape(qid)}"]`);
+        answers[qid] = input ? input.value.trim() : "";
     });
 }
 
@@ -233,9 +335,13 @@ function renderStudentPage() {
     }).join("");
 
     const questionsHtml = (page.questions || []).map(q => `
-        <div class="student-question-row">
-            <label>Câu ${escapeHtml(q.number)}</label>
-            <input class="student-answer-input" data-question-id="${escapeHtml(q.id)}" type="text" value="${escapeHtml(answers[q.id] || '')}" placeholder="Nhập đáp án..." autocomplete="off">
+        <div class="student-question-card">
+            <div class="student-question-title">
+                <strong>Câu ${escapeHtml(q.number)}</strong>
+                <span class="question-type-badge">${escapeHtml(questionTypeLabel(q.question_type))}</span>
+                <span class="question-score">${escapeHtml(q.score || 1)} điểm</span>
+            </div>
+            ${renderAnswerControl(q)}
         </div>
     `).join("") || `<p class="hint-text">Trang này không có câu trả lời cần nhập.</p>`;
 
