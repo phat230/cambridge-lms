@@ -1,21 +1,25 @@
-import asyncio
+import io
 import os
 import re
+import tempfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
+from urllib.parse import quote
 
 import boto3
+import fitz  # PyMuPDF
+from botocore.config import Config
 from botocore.exceptions import ClientError
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import FastAPI, Body, HTTPException, status, UploadFile, File
+from fastapi import FastAPI, Body, HTTPException, status, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from passlib.context import CryptContext
+from PIL import Image
 
 from app.database import ping_database, database
 from app.models import ExamSchema, StudentRegister, UserLogin
-
 
 # ==========================================
 # PASSWORD HASH
@@ -41,26 +45,15 @@ submission_collection = database.get_collection("submissions")
 
 # ==========================================
 # CLOUDFLARE R2 CONFIG
-# Render Environment cần có:
-# R2_ACCOUNT_ID
-# R2_ACCESS_KEY_ID
-# R2_SECRET_ACCESS_KEY
-# R2_BUCKET_NAME
-# R2_PUBLIC_URL
 # ==========================================
 R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID")
 R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
 R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
 R2_BUCKET_NAME = os.getenv("R2_BUCKET_NAME")
 R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL")
-
-R2_ENDPOINT_URL = (
-    f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-    if R2_ACCOUNT_ID else None
-)
+R2_ENDPOINT_URL = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com" if R2_ACCOUNT_ID else None
 
 r2_client = None
-
 if R2_ACCOUNT_ID and R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY:
     r2_client = boto3.client(
         service_name="s3",
@@ -68,6 +61,11 @@ if R2_ACCOUNT_ID and R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY:
         aws_access_key_id=R2_ACCESS_KEY_ID,
         aws_secret_access_key=R2_SECRET_ACCESS_KEY,
         region_name="auto",
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path"},
+            retries={"max_attempts": 3, "mode": "standard"},
+        ),
     )
 
 
@@ -76,9 +74,8 @@ def check_r2_config() -> None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=(
-                "Thiếu cấu hình Cloudflare R2. Hãy kiểm tra "
-                "R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, "
-                "R2_BUCKET_NAME, R2_PUBLIC_URL."
+                "Thiếu cấu hình Cloudflare R2. Hãy kiểm tra R2_ACCOUNT_ID, "
+                "R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME, R2_PUBLIC_URL."
             ),
         )
 
@@ -90,163 +87,161 @@ def get_object_id(id_value: str) -> ObjectId:
     try:
         return ObjectId(id_value)
     except (InvalidId, TypeError):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="ID không hợp lệ",
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID không hợp lệ")
 
 
 def safe_filename(filename: str) -> str:
-    """Làm sạch tên file nhưng vẫn giữ phần mở rộng .pdf/.mp3/.wav/.ogg."""
-    filename = filename.strip().replace(" ", "_")
+    filename = (filename or "file").strip().replace(" ", "_")
     filename = re.sub(r"[^a-zA-Z0-9._-]", "_", filename)
-    return filename or f"file_{ObjectId()}"
-
-
-def answer_input_id(section_name: str, part_name: str, q_num: str) -> str:
-    raw = f"ans_{section_name}_{part_name}_{q_num}"
-    return re.sub(r"\s+", "", raw)
+    return filename or "file"
 
 
 def serialize_mongo_doc(doc: dict) -> dict:
-    """Chuyển ObjectId trong document MongoDB thành string để FastAPI trả JSON."""
     if not doc:
         return doc
-
     for key, value in list(doc.items()):
         if isinstance(value, ObjectId):
             doc[key] = str(value)
+        elif isinstance(value, datetime):
+            doc[key] = value.isoformat()
         elif isinstance(value, list):
-            doc[key] = [
-                serialize_mongo_doc(item) if isinstance(item, dict) else item
-                for item in value
-            ]
+            doc[key] = [serialize_mongo_doc(item) if isinstance(item, dict) else item for item in value]
         elif isinstance(value, dict):
             doc[key] = serialize_mongo_doc(value)
-
     return doc
 
 
-def build_public_url(storage_key: str) -> str:
-    return f"{R2_PUBLIC_URL.rstrip('/')}/{storage_key}"
+def public_url_for_key(key: str) -> str:
+    return f"{R2_PUBLIC_URL.rstrip('/')}/{quote(key, safe='/')}"
+
+
+def normalize_answer(value: str) -> str:
+    value = str(value or "").strip().lower()
+    value = re.sub(r"\s+", " ", value)
+    return value
+
+
+def split_correct_answers(answer: str) -> list[str]:
+    raw = str(answer or "")
+    # Giáo viên có thể nhập nhiều đáp án đúng bằng dấu | hoặc /
+    parts = re.split(r"\s*(?:\||/)\s*", raw)
+    return [normalize_answer(p) for p in parts if normalize_answer(p)]
+
+
+def all_page_storage_keys(exam: dict) -> list[str]:
+    keys = []
+    if exam.get("book_pdf_storage_key"):
+        keys.append(exam["book_pdf_storage_key"])
+    for page in exam.get("pages", []):
+        if page.get("storage_key"):
+            keys.append(page["storage_key"])
+        for audio in page.get("audio_tracks", []):
+            if audio.get("storage_key"):
+                keys.append(audio["storage_key"])
+    return keys
+
+
+async def delete_file_from_r2(key: Optional[str]) -> None:
+    if not key:
+        return
+    check_r2_config()
+    try:
+        r2_client.delete_object(Bucket=R2_BUCKET_NAME, Key=key)
+    except Exception as e:
+        print(f"Không thể xóa file R2 {key}: {e}")
+
+
+async def upload_bytes_to_r2(data: bytes, key: str, content_type: str, content_disposition: str = "inline") -> str:
+    check_r2_config()
+    try:
+        r2_client.put_object(
+            Bucket=R2_BUCKET_NAME,
+            Key=key,
+            Body=data,
+            ContentType=content_type,
+            ContentDisposition=content_disposition,
+        )
+        return public_url_for_key(key)
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi upload R2: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi upload file: {str(e)}")
 
 
 async def upload_file_to_r2(file: UploadFile, key: str) -> str:
     check_r2_config()
-
     try:
         file.file.seek(0)
-
-        lower_key = key.lower()
-
-        if lower_key.endswith(".pdf"):
+        lower = key.lower()
+        if lower.endswith(".pdf"):
             content_type = "application/pdf"
-            content_disposition = "inline"
-        elif lower_key.endswith(".mp3"):
+        elif lower.endswith(".mp3"):
             content_type = "audio/mpeg"
-            content_disposition = "inline"
-        elif lower_key.endswith(".wav"):
+        elif lower.endswith(".wav"):
             content_type = "audio/wav"
-            content_disposition = "inline"
-        elif lower_key.endswith(".ogg"):
+        elif lower.endswith(".ogg"):
             content_type = "audio/ogg"
-            content_disposition = "inline"
         else:
             content_type = file.content_type or "application/octet-stream"
-            content_disposition = "inline"
 
         r2_client.upload_fileobj(
             Fileobj=file.file,
             Bucket=R2_BUCKET_NAME,
             Key=key,
-            ExtraArgs={
-                "ContentType": content_type,
-                "ContentDisposition": content_disposition
-            }
+            ExtraArgs={"ContentType": content_type, "ContentDisposition": "inline"},
         )
-
-        return f"{R2_PUBLIC_URL.rstrip('/')}/{key}"
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Lỗi upload file: {str(e)}"
-        )    
-    """Upload file lên Cloudflare R2 và trả về public URL."""
-    check_r2_config()
-
-    try:
-        file.file.seek(0)
-
-        extra_args = {}
-        if file.content_type:
-            extra_args["ContentType"] = file.content_type
-
-        await asyncio.to_thread(
-            r2_client.upload_fileobj,
-            Fileobj=file.file,
-            Bucket=R2_BUCKET_NAME,
-            Key=storage_key,
-            ExtraArgs=extra_args,
-        )
-
-        return build_public_url(storage_key)
-
+        return public_url_for_key(key)
     except ClientError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Lỗi upload R2: {str(e)}",
-        )
+        raise HTTPException(status_code=500, detail=f"Lỗi upload R2: {str(e)}")
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Lỗi upload file: {str(e)}",
-        )
+        raise HTTPException(status_code=500, detail=f"Lỗi upload file: {str(e)}")
 
 
-async def delete_file_from_r2(storage_key: Optional[str]) -> None:
-    """Xóa file khỏi R2 nếu có storage_key. Lỗi xóa chỉ log, không làm crash API."""
-    if not storage_key:
-        return
+def render_pdf_pages_to_jpegs(pdf_path: str, exam_id: str, zoom: float = 1.35, quality: int = 82) -> list[dict]:
+    pages = []
+    matrix = fitz.Matrix(zoom, zoom)
 
-    try:
-        check_r2_config()
-        await asyncio.to_thread(
-            r2_client.delete_object,
-            Bucket=R2_BUCKET_NAME,
-            Key=storage_key,
-        )
-    except Exception as e:
-        print(f"Không thể xóa file R2 {storage_key}: {e}")
+    with fitz.open(pdf_path) as doc:
+        for index, page in enumerate(doc, start=1):
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+            buffer = io.BytesIO()
+            image.save(buffer, format="JPEG", quality=quality, optimize=True)
+            image_bytes = buffer.getvalue()
+
+            page_id = str(ObjectId())
+            storage_key = f"page-images/{exam_id}/page_{index:03d}.jpg"
+            pages.append({
+                "id": page_id,
+                "page_number": index,
+                "image_bytes": image_bytes,
+                "storage_key": storage_key,
+            })
+    return pages
 
 
-# ==========================================
-# LIFESPAN
-# Đã xóa seed_teacher_account().
-# Backend chỉ kiểm tra MongoDB khi khởi động.
-# ==========================================
+def find_page(exam: dict, page_id: str) -> Optional[dict]:
+    for page in exam.get("pages", []):
+        if page.get("id") == page_id:
+            return page
+    return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await ping_database()
     yield
 
 
-# ==========================================
-# APP CONFIG
-# ==========================================
 app = FastAPI(
     title="Cambridge LMS API",
-    description="Hệ thống quản lý bài thi tiếng Anh",
-    version="1.3.0-r2",
+    description="Hệ thống quản lý bài thi tiếng Anh dạng lật trang",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
-
-# ==========================================
-# CORS CONFIG
-# ==========================================
 FRONTEND_URL = os.getenv("FRONTEND_URL", "*")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if FRONTEND_URL == "*" else [FRONTEND_URL],
@@ -256,15 +251,9 @@ app.add_middleware(
 )
 
 
-# ==========================================
-# ROOT API
-# ==========================================
 @app.get("/")
 async def read_root():
-    return {
-        "status": "online",
-        "message": "Cambridge LMS API đang hoạt động với Cloudflare R2",
-    }
+    return {"status": "online", "message": "Cambridge LMS API đang hoạt động"}
 
 
 # ==========================================
@@ -273,12 +262,8 @@ async def read_root():
 @app.post("/auth/register", status_code=status.HTTP_201_CREATED)
 async def register_student(user: StudentRegister = Body(...)):
     existing_user = await user_collection.find_one({"email": user.email})
-
     if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email này đã được đăng ký!",
-        )
+        raise HTTPException(status_code=400, detail="Email này đã được đăng ký!")
 
     user_dict = {
         "email": user.email,
@@ -286,33 +271,17 @@ async def register_student(user: StudentRegister = Body(...)):
         "role": "student",
         "created_at": datetime.now(timezone.utc),
     }
-
-    new_user = await user_collection.insert_one(user_dict)
-
-    if new_user.inserted_id:
+    result = await user_collection.insert_one(user_dict)
+    if result.inserted_id:
         return {"message": "Đăng ký thành công!"}
-
-    raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail="Lỗi đăng ký",
-    )
+    raise HTTPException(status_code=500, detail="Lỗi đăng ký")
 
 
 @app.post("/auth/login")
 async def login(user_credentials: UserLogin = Body(...)):
     user = await user_collection.find_one({"email": user_credentials.email})
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Sai thông tin đăng nhập",
-        )
-
-    if not verify_password(user_credentials.password, user["password"]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Sai thông tin đăng nhập",
-        )
+    if not user or not verify_password(user_credentials.password, user["password"]):
+        raise HTTPException(status_code=401, detail="Sai thông tin đăng nhập")
 
     return {
         "message": "Đăng nhập thành công",
@@ -328,528 +297,421 @@ async def login(user_credentials: UserLogin = Body(...)):
 @app.get("/exams/")
 async def get_all_exams():
     exams = []
-
-    async for document in exam_collection.find().sort("created_at", -1):
-        document = serialize_mongo_doc(document)
-        exams.append(document)
-
+    async for doc in exam_collection.find().sort("created_at", -1):
+        doc = serialize_mongo_doc(doc)
+        exams.append(doc)
     return exams
+
+
+@app.get("/exams/{exam_id}")
+async def get_exam(exam_id: str):
+    exam = await exam_collection.find_one({"_id": get_object_id(exam_id)})
+    if not exam:
+        raise HTTPException(status_code=404, detail="Không tìm thấy bài thi")
+    return serialize_mongo_doc(exam)
 
 
 @app.post("/exams/", status_code=status.HTTP_201_CREATED)
 async def create_exam(exam: ExamSchema = Body(...)):
     exam_dict = exam.model_dump()
     exam_dict["created_at"] = datetime.now(timezone.utc)
-    exam_dict["audio_folders"] = []
-
-    new_exam = await exam_collection.insert_one(exam_dict)
-
-    if new_exam.inserted_id:
-        return {"exam_id": str(new_exam.inserted_id)}
-
-    raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail="Không thể lưu bài thi",
-    )
+    exam_dict["pages"] = []
+    exam_dict["version"] = "flip_pages"
+    result = await exam_collection.insert_one(exam_dict)
+    if result.inserted_id:
+        return {"exam_id": str(result.inserted_id)}
+    raise HTTPException(status_code=500, detail="Không thể lưu bài thi")
 
 
 @app.delete("/exams/{exam_id}")
 async def delete_exam(exam_id: str):
     exam_object_id = get_object_id(exam_id)
-
     exam = await exam_collection.find_one({"_id": exam_object_id})
     if not exam:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy bài thi",
-        )
+        raise HTTPException(status_code=404, detail="Không tìm thấy bài thi")
 
-    # Xóa PDF trên R2 nếu có
-    await delete_file_from_r2(exam.get("pdf_storage_key"))
-
-    # Xóa toàn bộ audio trên R2 nếu có
-    for folder in exam.get("audio_folders", []):
-        for track in folder.get("tracks", []):
-            await delete_file_from_r2(track.get("storage_key"))
+    for key in all_page_storage_keys(exam):
+        await delete_file_from_r2(key)
 
     result = await exam_collection.delete_one({"_id": exam_object_id})
     await submission_collection.delete_many({"exam_id": exam_object_id})
 
     if result.deleted_count == 1:
-        return {"message": "Đã xóa bài thi, file R2 và kết quả liên quan"}
-
-    raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail="Không thể xóa bài thi",
-    )
+        return {"message": "Đã xóa bài thi, trang, audio và kết quả liên quan"}
+    raise HTTPException(status_code=500, detail="Không thể xóa bài thi")
 
 
 # ==========================================
-# PDF API - CLOUDFLARE R2
+# BOOK PDF → PAGE IMAGES
 # ==========================================
-@app.post("/exams/{exam_id}/upload-pdf/")
-async def upload_exam_pdf(exam_id: str, pdf_file: UploadFile = File(...)):
-    """
-    Upload hoặc thay PDF.
-    Nếu bài thi đã có PDF cũ trên R2, backend sẽ xóa file cũ sau khi upload file mới thành công.
-    """
+@app.post("/exams/{exam_id}/upload-book-pdf/")
+async def upload_book_pdf(exam_id: str, pdf_file: UploadFile = File(...)):
     exam_object_id = get_object_id(exam_id)
-
     exam = await exam_collection.find_one({"_id": exam_object_id})
     if not exam:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy bài thi",
-        )
+        raise HTTPException(status_code=404, detail="Không tìm thấy bài thi")
 
-    filename = pdf_file.filename or ""
-
+    filename = pdf_file.filename or "book.pdf"
     if not filename.lower().endswith(".pdf"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Chỉ cho phép tải file PDF",
-        )
+        raise HTTPException(status_code=400, detail="Chỉ cho phép tải file PDF")
+
+    # Nếu upload sách mới, xóa sách/trang/audio cũ để không tốn dung lượng R2.
+    for key in all_page_storage_keys(exam):
+        await delete_file_from_r2(key)
 
     safe_name = safe_filename(filename)
-    storage_key = f"pdfs/{exam_id}/{ObjectId()}_{safe_name}"
+    original_pdf_key = f"books/{exam_id}/{safe_name}"
 
-    pdf_url = await upload_file_to_r2(pdf_file, storage_key)
+    # Lưu tạm PDF ra /tmp để PyMuPDF tách trang.
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            pdf_file.file.seek(0)
+            while True:
+                chunk = pdf_file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                tmp.write(chunk)
+            tmp_path = tmp.name
 
-    # Upload file mới thành công rồi mới xóa file cũ để tránh mất file nếu upload lỗi
-    old_storage_key = exam.get("pdf_storage_key")
-    if old_storage_key and old_storage_key != storage_key:
-        await delete_file_from_r2(old_storage_key)
+        # Upload PDF gốc để giáo viên có bản lưu trữ.
+        with open(tmp_path, "rb") as f:
+            pdf_bytes = f.read()
+        book_pdf_url = await upload_bytes_to_r2(pdf_bytes, original_pdf_key, "application/pdf")
 
-    await exam_collection.update_one(
-        {"_id": exam_object_id},
-        {
-            "$set": {
-                "pdf_file_url": pdf_url,
-                "pdf_storage_key": storage_key,
-                "pdf_storage_provider": "cloudflare_r2",
-            },
-            "$unset": {
-                # Xóa field Cloudinary cũ nếu từng dùng Cloudinary
-                "pdf_public_id": "",
-                "pdf_resource_type": "",
-            },
-        },
-    )
+        rendered_pages = render_pdf_pages_to_jpegs(tmp_path, exam_id)
 
-    return {
-        "message": "Tải PDF thành công!",
-        "pdf_file_url": pdf_url,
-    }
+        pages = []
+        for item in rendered_pages:
+            image_url = await upload_bytes_to_r2(item["image_bytes"], item["storage_key"], "image/jpeg")
+            pages.append({
+                "id": item["id"],
+                "page_number": item["page_number"],
+                "image_url": image_url,
+                "storage_key": item["storage_key"],
+                "is_active": True,
+                "questions": [],
+                "audio_tracks": [],
+            })
+
+        await exam_collection.update_one(
+            {"_id": exam_object_id},
+            {"$set": {
+                "book_pdf_url": book_pdf_url,
+                "book_pdf_storage_key": original_pdf_key,
+                "book_pdf_name": filename,
+                "pages": pages,
+                "updated_at": datetime.now(timezone.utc),
+            }},
+        )
+
+        return {
+            "message": f"Đã upload PDF và tách thành {len(pages)} trang.",
+            "page_count": len(pages),
+            "book_pdf_url": book_pdf_url,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi tách PDF: {str(e)}")
+    finally:
+        try:
+            if 'tmp_path' in locals() and os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
 
 
-@app.delete("/exams/{exam_id}/pdf")
-async def delete_exam_pdf(exam_id: str):
+@app.get("/exams/{exam_id}/pages")
+async def get_exam_pages(exam_id: str):
+    exam = await exam_collection.find_one({"_id": get_object_id(exam_id)})
+    if not exam:
+        raise HTTPException(status_code=404, detail="Không tìm thấy bài thi")
+    return serialize_mongo_doc({"pages": exam.get("pages", [])})
+
+
+@app.patch("/exams/{exam_id}/pages/{page_id}/toggle")
+async def toggle_page(exam_id: str, page_id: str, payload: dict = Body(...)):
     exam_object_id = get_object_id(exam_id)
+    is_active = bool(payload.get("is_active", True))
 
+    result = await exam_collection.update_one(
+        {"_id": exam_object_id, "pages.id": page_id},
+        {"$set": {"pages.$.is_active": is_active, "updated_at": datetime.now(timezone.utc)}},
+    )
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Không tìm thấy trang")
+    return {"message": "Đã cập nhật trạng thái trang", "is_active": is_active}
+
+
+@app.delete("/exams/{exam_id}/pages/{page_id}")
+async def delete_page(exam_id: str, page_id: str):
+    exam_object_id = get_object_id(exam_id)
     exam = await exam_collection.find_one({"_id": exam_object_id})
     if not exam:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy bài thi",
-        )
+        raise HTTPException(status_code=404, detail="Không tìm thấy bài thi")
 
-    await delete_file_from_r2(exam.get("pdf_storage_key"))
+    page = find_page(exam, page_id)
+    if not page:
+        raise HTTPException(status_code=404, detail="Không tìm thấy trang")
 
-    await exam_collection.update_one(
-        {"_id": exam_object_id},
-        {
-            "$unset": {
-                "pdf_file_url": "",
-                "pdf_storage_key": "",
-                "pdf_storage_provider": "",
-                "pdf_public_id": "",
-                "pdf_resource_type": "",
-            }
-        },
-    )
-
-    return {"message": "Đã xóa PDF khỏi bài thi và Cloudflare R2"}
-
-
-# ==========================================
-# AUDIO MANAGER API - CLOUDFLARE R2
-# ==========================================
-@app.post("/exams/{exam_id}/audio-folders/")
-async def create_audio_folder(
-    exam_id: str,
-    folder_name: str = Body(..., embed=True),
-    limit: int = Body(0, embed=True),
-):
-    exam_object_id = get_object_id(exam_id)
-
-    exam = await exam_collection.find_one({"_id": exam_object_id})
-    if not exam:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy bài thi",
-        )
-
-    if not folder_name.strip():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tên thư mục không được để trống",
-        )
-
-    if limit < 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Giới hạn lượt nghe không hợp lệ",
-        )
-
-    new_folder = {
-        "id": str(ObjectId()),
-        "name": folder_name.strip(),
-        "limit": limit,
-        "tracks": [],
-    }
-
-    await exam_collection.update_one(
-        {"_id": exam_object_id},
-        {"$push": {"audio_folders": new_folder}},
-    )
-
-    return {
-        "message": "Tạo thư mục thành công",
-        "folder": new_folder,
-    }
-
-
-@app.delete("/exams/{exam_id}/audio-folders/{folder_id}")
-async def delete_audio_folder(exam_id: str, folder_id: str):
-    exam_object_id = get_object_id(exam_id)
-
-    exam = await exam_collection.find_one({"_id": exam_object_id})
-    if not exam:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy bài thi",
-        )
-
-    target_folder = None
-    for folder in exam.get("audio_folders", []):
-        if folder.get("id") == folder_id:
-            target_folder = folder
-            break
-
-    if not target_folder:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy thư mục audio",
-        )
-
-    for track in target_folder.get("tracks", []):
-        await delete_file_from_r2(track.get("storage_key"))
+    await delete_file_from_r2(page.get("storage_key"))
+    for audio in page.get("audio_tracks", []):
+        await delete_file_from_r2(audio.get("storage_key"))
 
     result = await exam_collection.update_one(
         {"_id": exam_object_id},
-        {"$pull": {"audio_folders": {"id": folder_id}}},
+        {"$pull": {"pages": {"id": page_id}}, "$set": {"updated_at": datetime.now(timezone.utc)}},
     )
-
     if result.modified_count == 0:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Không thể xóa thư mục audio",
-        )
-
-    return {"message": "Đã xóa thư mục audio và toàn bộ file trên Cloudflare R2"}
+        raise HTTPException(status_code=500, detail="Không thể xóa trang")
+    return {"message": "Đã xóa trang và file trên R2"}
 
 
-@app.post("/exams/{exam_id}/audio-folders/{folder_id}/upload")
-async def upload_audio_to_folder(
+# ==========================================
+# PAGE QUESTIONS
+# ==========================================
+@app.post("/exams/{exam_id}/pages/{page_id}/questions")
+async def add_page_question(exam_id: str, page_id: str, payload: dict = Body(...)):
+    exam_object_id = get_object_id(exam_id)
+    number = str(payload.get("number", "")).strip()
+    answer = str(payload.get("answer", "")).strip()
+    score = float(payload.get("score", 1) or 1)
+    prompt = str(payload.get("prompt", "")).strip()
+
+    if not number:
+        raise HTTPException(status_code=400, detail="Thiếu số câu")
+    if not answer:
+        raise HTTPException(status_code=400, detail="Thiếu đáp án đúng")
+    if score <= 0:
+        raise HTTPException(status_code=400, detail="Điểm phải lớn hơn 0")
+
+    question = {"id": str(ObjectId()), "number": number, "answer": answer, "score": score, "prompt": prompt}
+
+    result = await exam_collection.update_one(
+        {"_id": exam_object_id, "pages.id": page_id},
+        {"$push": {"pages.$.questions": question}, "$set": {"updated_at": datetime.now(timezone.utc)}},
+    )
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Không tìm thấy trang")
+    return {"message": "Đã thêm câu hỏi", "question": question}
+
+
+@app.put("/exams/{exam_id}/pages/{page_id}/questions/{question_id}")
+async def update_page_question(exam_id: str, page_id: str, question_id: str, payload: dict = Body(...)):
+    exam_object_id = get_object_id(exam_id)
+    number = str(payload.get("number", "")).strip()
+    answer = str(payload.get("answer", "")).strip()
+    score = float(payload.get("score", 1) or 1)
+    prompt = str(payload.get("prompt", "")).strip()
+
+    if not number or not answer or score <= 0:
+        raise HTTPException(status_code=400, detail="Câu hỏi không hợp lệ")
+
+    new_question = {"id": question_id, "number": number, "answer": answer, "score": score, "prompt": prompt}
+
+    result = await exam_collection.update_one(
+        {"_id": exam_object_id, "pages.id": page_id},
+        {"$set": {"pages.$.questions.$[q]": new_question, "updated_at": datetime.now(timezone.utc)}},
+        array_filters=[{"q.id": question_id}],
+    )
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Không tìm thấy câu hỏi")
+    return {"message": "Đã cập nhật câu hỏi", "question": new_question}
+
+
+@app.delete("/exams/{exam_id}/pages/{page_id}/questions/{question_id}")
+async def delete_page_question(exam_id: str, page_id: str, question_id: str):
+    result = await exam_collection.update_one(
+        {"_id": get_object_id(exam_id), "pages.id": page_id},
+        {"$pull": {"pages.$.questions": {"id": question_id}}, "$set": {"updated_at": datetime.now(timezone.utc)}},
+    )
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Không tìm thấy câu hỏi")
+    return {"message": "Đã xóa câu hỏi"}
+
+
+# ==========================================
+# PAGE AUDIO
+# ==========================================
+@app.post("/exams/{exam_id}/pages/{page_id}/audio")
+async def upload_page_audio(
     exam_id: str,
-    folder_id: str,
-    audio_files: list[UploadFile] = File(...),
+    page_id: str,
+    audio_file: UploadFile = File(...),
+    limit: int = Form(0),
 ):
     exam_object_id = get_object_id(exam_id)
-
     exam = await exam_collection.find_one({"_id": exam_object_id})
     if not exam:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy bài thi",
-        )
+        raise HTTPException(status_code=404, detail="Không tìm thấy bài thi")
 
-    folder_exists = any(
-        folder.get("id") == folder_id
-        for folder in exam.get("audio_folders", [])
+    page = find_page(exam, page_id)
+    if not page:
+        raise HTTPException(status_code=404, detail="Không tìm thấy trang")
+
+    filename = audio_file.filename or "audio.mp3"
+    if not filename.lower().endswith((".mp3", ".wav", ".ogg")):
+        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ .mp3, .wav, .ogg")
+    if limit < 0:
+        raise HTTPException(status_code=400, detail="Giới hạn lượt nghe không hợp lệ")
+
+    audio_id = str(ObjectId())
+    key = f"page-audios/{exam_id}/{page_id}/{audio_id}_{safe_filename(filename)}"
+    audio_url = await upload_file_to_r2(audio_file, key)
+    audio = {"id": audio_id, "name": filename, "url": audio_url, "storage_key": key, "limit": limit}
+
+    result = await exam_collection.update_one(
+        {"_id": exam_object_id, "pages.id": page_id},
+        {"$push": {"pages.$.audio_tracks": audio}, "$set": {"updated_at": datetime.now(timezone.utc)}},
     )
+    if result.modified_count == 0:
+        await delete_file_from_r2(key)
+        raise HTTPException(status_code=500, detail="Không thể lưu audio")
+    return {"message": "Đã upload audio cho trang", "audio": audio}
 
-    if not folder_exists:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy thư mục audio",
-        )
 
-    uploaded_tracks = []
+@app.delete("/exams/{exam_id}/pages/{page_id}/audio/{audio_id}")
+async def delete_page_audio(exam_id: str, page_id: str, audio_id: str):
+    exam_object_id = get_object_id(exam_id)
+    exam = await exam_collection.find_one({"_id": exam_object_id})
+    if not exam:
+        raise HTTPException(status_code=404, detail="Không tìm thấy bài thi")
 
-    for file in audio_files:
-        filename = file.filename or ""
+    page = find_page(exam, page_id)
+    if not page:
+        raise HTTPException(status_code=404, detail="Không tìm thấy trang")
 
-        if not filename.lower().endswith((".mp3", ".wav", ".ogg")):
+    audio = None
+    for item in page.get("audio_tracks", []):
+        if item.get("id") == audio_id:
+            audio = item
+            break
+    if not audio:
+        raise HTTPException(status_code=404, detail="Không tìm thấy audio")
+
+    await delete_file_from_r2(audio.get("storage_key"))
+
+    result = await exam_collection.update_one(
+        {"_id": exam_object_id, "pages.id": page_id},
+        {"$pull": {"pages.$.audio_tracks": {"id": audio_id}}, "$set": {"updated_at": datetime.now(timezone.utc)}},
+    )
+    if result.modified_count == 0:
+        raise HTTPException(status_code=500, detail="Không thể xóa audio")
+    return {"message": "Đã xóa audio"}
+
+
+# ==========================================
+# STUDENT VIEW + SUBMISSION
+# ==========================================
+@app.get("/exams/{exam_id}/student-view")
+async def get_student_exam_view(exam_id: str):
+    exam = await exam_collection.find_one({"_id": get_object_id(exam_id)})
+    if not exam:
+        raise HTTPException(status_code=404, detail="Không tìm thấy bài thi")
+
+    pages = []
+    total_questions = 0
+    total_score = 0.0
+
+    for page in sorted(exam.get("pages", []), key=lambda p: p.get("page_number", 0)):
+        if not page.get("is_active", True):
             continue
 
-        track_id = str(ObjectId())
-        safe_name = safe_filename(filename)
-        storage_key = f"audios/{exam_id}/{folder_id}/{track_id}_{safe_name}"
+        safe_questions = []
+        for q in page.get("questions", []):
+            safe_questions.append({
+                "id": q.get("id"),
+                "number": q.get("number"),
+                "score": q.get("score", 1),
+                "prompt": q.get("prompt", ""),
+            })
+            total_questions += 1
+            total_score += float(q.get("score", 1) or 1)
 
-        audio_url = await upload_file_to_r2(file, storage_key)
-
-        uploaded_tracks.append(
-            {
-                "id": track_id,
-                "name": filename,
-                "url": audio_url,
-                "storage_key": storage_key,
-                "storage_provider": "cloudflare_r2",
-            }
-        )
-
-    if not uploaded_tracks:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Không có file audio hợp lệ. Chỉ hỗ trợ .mp3, .wav, .ogg",
-        )
-
-    await exam_collection.update_one(
-        {"_id": exam_object_id, "audio_folders.id": folder_id},
-        {"$push": {"audio_folders.$.tracks": {"$each": uploaded_tracks}}},
-    )
+        pages.append({
+            "id": page.get("id"),
+            "page_number": page.get("page_number"),
+            "image_url": page.get("image_url"),
+            "questions": safe_questions,
+            "audio_tracks": page.get("audio_tracks", []),
+        })
 
     return {
-        "message": "Tải nhạc thành công!",
-        "tracks": uploaded_tracks,
+        "_id": str(exam["_id"]),
+        "title": exam.get("title"),
+        "level": exam.get("level"),
+        "duration_minutes": exam.get("duration_minutes"),
+        "total_score": round(total_score, 2) if total_score else exam.get("total_score", 0),
+        "total_questions": total_questions,
+        "pages": pages,
     }
 
 
-@app.put("/exams/{exam_id}/audio-folders/{folder_id}/tracks/{track_id}/replace")
-async def replace_audio_track(
-    exam_id: str,
-    folder_id: str,
-    track_id: str,
-    audio_file: UploadFile = File(...),
-):
-    """
-    Thay file audio.
-    Backend upload audio mới lên R2, sau đó xóa audio cũ để tiết kiệm dung lượng.
-    """
-    exam_object_id = get_object_id(exam_id)
-
-    exam = await exam_collection.find_one({"_id": exam_object_id})
-    if not exam:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy bài thi",
-        )
-
-    target_track = None
-
-    for folder in exam.get("audio_folders", []):
-        if folder.get("id") == folder_id:
-            for track in folder.get("tracks", []):
-                if track.get("id") == track_id:
-                    target_track = track
-                    break
-            break
-
-    if not target_track:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy file audio",
-        )
-
-    filename = audio_file.filename or ""
-
-    if not filename.lower().endswith((".mp3", ".wav", ".ogg")):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Chỉ hỗ trợ .mp3, .wav, .ogg",
-        )
-
-    safe_name = safe_filename(filename)
-    storage_key = f"audios/{exam_id}/{folder_id}/{track_id}_{safe_name}"
-
-    audio_url = await upload_file_to_r2(audio_file, storage_key)
-
-    old_storage_key = target_track.get("storage_key")
-    if old_storage_key and old_storage_key != storage_key:
-        await delete_file_from_r2(old_storage_key)
-
-    new_track = {
-        "id": track_id,
-        "name": filename,
-        "url": audio_url,
-        "storage_key": storage_key,
-        "storage_provider": "cloudflare_r2",
-    }
-
-    await exam_collection.update_one(
-        {"_id": exam_object_id, "audio_folders.id": folder_id},
-        {"$set": {"audio_folders.$.tracks.$[track]": new_track}},
-        array_filters=[{"track.id": track_id}],
-    )
-
-    return {
-        "message": "Đã thay audio thành công",
-        "track": new_track,
-    }
-
-
-@app.delete("/exams/{exam_id}/audio-folders/{folder_id}/tracks/{track_id}")
-async def delete_audio_track(exam_id: str, folder_id: str, track_id: str):
-    exam_object_id = get_object_id(exam_id)
-
-    exam = await exam_collection.find_one({"_id": exam_object_id})
-    if not exam:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy bài thi",
-        )
-
-    target_track = None
-
-    for folder in exam.get("audio_folders", []):
-        if folder.get("id") == folder_id:
-            for track in folder.get("tracks", []):
-                if track.get("id") == track_id:
-                    target_track = track
-                    break
-            break
-
-    if not target_track:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy file audio để xóa",
-        )
-
-    await delete_file_from_r2(target_track.get("storage_key"))
-
-    result = await exam_collection.update_one(
-        {"_id": exam_object_id, "audio_folders.id": folder_id},
-        {"$pull": {"audio_folders.$.tracks": {"id": track_id}}},
-    )
-
-    if result.modified_count == 0:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy file audio để xóa",
-        )
-
-    return {"message": "Đã xóa file audio khỏi bài thi và Cloudflare R2"}
-
-
-# ==========================================
-# SUBMISSION API
-# ==========================================
 @app.get("/exams/{exam_id}/my-submission/{user_id}")
 async def get_my_submission(exam_id: str, user_id: str):
-    exam_object_id = get_object_id(exam_id)
-    user_object_id = get_object_id(user_id)
-
-    submission = await submission_collection.find_one(
-        {
-            "exam_id": exam_object_id,
-            "user_id": user_object_id,
-        }
-    )
-
+    submission = await submission_collection.find_one({
+        "exam_id": get_object_id(exam_id),
+        "user_id": get_object_id(user_id),
+    })
     if not submission:
         return {"submitted": False}
-
-    submission = serialize_mongo_doc(submission)
-
-    return {
-        "submitted": True,
-        "submission": submission,
-    }
+    return {"submitted": True, "submission": serialize_mongo_doc(submission)}
 
 
 @app.post("/exams/{exam_id}/submit")
 async def submit_exam(exam_id: str, payload: dict = Body(...)):
     exam_object_id = get_object_id(exam_id)
-
     user_id = payload.get("user_id")
     student_email = payload.get("student_email")
     answers = payload.get("answers", {})
-    time_spent_seconds = int(payload.get("time_spent_seconds", 0))
+    time_spent_seconds = int(payload.get("time_spent_seconds", 0) or 0)
 
     if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Thiếu user_id",
-        )
-
+        raise HTTPException(status_code=400, detail="Thiếu user_id")
     user_object_id = get_object_id(user_id)
 
     exam = await exam_collection.find_one({"_id": exam_object_id})
     if not exam:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy bài thi",
-        )
+        raise HTTPException(status_code=404, detail="Không tìm thấy bài thi")
 
-    existed_submission = await submission_collection.find_one(
-        {
-            "exam_id": exam_object_id,
-            "user_id": user_object_id,
-        }
-    )
+    existed = await submission_collection.find_one({"exam_id": exam_object_id, "user_id": user_object_id})
+    if existed:
+        raise HTTPException(status_code=400, detail="Bạn đã làm bài thi này rồi. Mỗi học sinh chỉ được làm 1 lần.")
 
-    if existed_submission:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Bạn đã làm bài thi này rồi. Mỗi học sinh chỉ được làm 1 lần.",
-        )
-
-    answer_key = exam.get("answer_key")
-    if not answer_key:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Bài thi chưa có đáp án",
-        )
-
+    detail_rows = []
     total_score = 0.0
     correct_count = 0
     total_questions = 0
-    detail_rows = []
 
-    for section_name, parts in answer_key.items():
-        for part_name, part_data in parts.items():
-            num_questions = int(part_data.get("num_questions", 0))
-            part_score = float(part_data.get("part_score", 0))
-            points_per_question = part_score / num_questions if num_questions > 0 else 0
+    for page in sorted(exam.get("pages", []), key=lambda p: p.get("page_number", 0)):
+        if not page.get("is_active", True):
+            continue
+        for q in page.get("questions", []):
+            total_questions += 1
+            qid = q.get("id")
+            student_answer = normalize_answer(answers.get(qid, ""))
+            correct_options = split_correct_answers(q.get("answer", ""))
+            is_correct = bool(student_answer) and student_answer in correct_options
+            score = float(q.get("score", 1) or 1)
+            earned = score if is_correct else 0.0
+            if is_correct:
+                correct_count += 1
+                total_score += earned
 
-            for question in part_data.get("questions", []):
-                total_questions += 1
+            detail_rows.append({
+                "page_id": page.get("id"),
+                "page_number": page.get("page_number"),
+                "question_id": qid,
+                "question_number": q.get("number"),
+                "student_answer": student_answer,
+                "correct_answer": q.get("answer", ""),
+                "is_correct": is_correct,
+                "earned_score": round(earned, 2),
+                "max_score": score,
+            })
 
-                q_num = str(question.get("qNum"))
-                correct_answer = str(question.get("answer", "")).strip().lower()
-
-                input_id = answer_input_id(section_name, part_name, q_num)
-                student_answer = str(answers.get(input_id, "")).strip().lower()
-
-                is_correct = student_answer != "" and student_answer == correct_answer
-                earned_score = points_per_question if is_correct else 0
-
-                if is_correct:
-                    correct_count += 1
-                    total_score += earned_score
-
-                detail_rows.append(
-                    {
-                        "section": section_name,
-                        "part": part_name,
-                        "question": q_num,
-                        "student_answer": student_answer,
-                        "correct_answer": correct_answer,
-                        "is_correct": is_correct,
-                        "earned_score": round(earned_score, 2),
-                    }
-                )
+    if total_questions == 0:
+        raise HTTPException(status_code=400, detail="Bài thi chưa có câu hỏi")
 
     submission_doc = {
         "exam_id": exam_object_id,
@@ -865,7 +727,6 @@ async def submit_exam(exam_id: str, payload: dict = Body(...)):
         "time_spent_seconds": time_spent_seconds,
         "submitted_at": datetime.now(timezone.utc),
     }
-
     result = await submission_collection.insert_one(submission_doc)
 
     return {
@@ -880,33 +741,25 @@ async def submit_exam(exam_id: str, payload: dict = Body(...)):
 
 
 @app.get("/teacher/submissions")
-async def get_teacher_submissions(
-    level: Optional[str] = None,
-    exam_id: Optional[str] = None,
-):
+async def get_teacher_submissions(level: Optional[str] = None, exam_id: Optional[str] = None):
     query = {}
-
     if level and level != "all":
         query["exam_level"] = level
-
     if exam_id and exam_id != "all":
         query["exam_id"] = get_object_id(exam_id)
 
-    cursor = submission_collection.find(query).sort(
-        [
-            ("correct_count", -1),
-            ("time_spent_seconds", 1),
-            ("submitted_at", 1),
-        ]
-    )
+    cursor = submission_collection.find(query).sort([
+        ("correct_count", -1),
+        ("score", -1),
+        ("time_spent_seconds", 1),
+        ("submitted_at", 1),
+    ])
 
     submissions = []
     rank = 1
-
     async for doc in cursor:
         doc = serialize_mongo_doc(doc)
         doc["rank"] = rank
         submissions.append(doc)
         rank += 1
-
     return submissions
