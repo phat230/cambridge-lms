@@ -129,3 +129,118 @@ input[type="file"] { padding: 10px 0; }
     body { padding: 10px; }
     .header { flex-direction: column; gap: 10px; align-items: flex-start; }
 }
+
+/* Question types + alternative answers */
+.question-edit-card,
+.question-add-card,
+.student-question-card {
+    background: #f9fbfd;
+    border: 1px solid #dce6ef;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+.question-edit-header,
+.student-question-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+.question-type-badge {
+    display: inline-block;
+    background: #e3f2fd;
+    color: #1565c0;
+    border-radius: 999px;
+    padding: 4px 9px;
+    font-size: 12px;
+    font-weight: bold;
+}
+.question-score {
+    color: #795548;
+    background: #fff8e1;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: bold;
+}
+.question-edit-grid {
+    display: grid;
+    grid-template-columns: 1fr 1.5fr 0.8fr;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.question-edit-card input,
+.question-edit-card select,
+.question-add-card input,
+.question-add-card select,
+.question-add-card textarea {
+    margin-bottom: 8px;
+}
+.question-help-text {
+    font-size: 12px;
+    color: #666;
+    margin: 6px 0 10px 0;
+    line-height: 1.45;
+}
+.question-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+.question-prompt {
+    color: #444;
+    background: #fff;
+    border-left: 3px solid #2196F3;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    border-radius: 4px;
+}
+.student-question-card {
+    background: #fff;
+}
+.student-choice-group {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 10px 0;
+}
+.choice-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid #cfd8dc;
+    border-radius: 999px;
+    padding: 8px 12px;
+    background: #fff;
+    cursor: pointer;
+    font-weight: bold;
+    color: #333;
+}
+.choice-pill:hover {
+    background: #e3f2fd;
+    border-color: #90caf9;
+}
+.choice-pill input {
+    width: auto;
+    margin: 0;
+}
+.student-answer-input {
+    width: 100%;
+    box-sizing: border-box;
+}
+textarea.student-answer-input {
+    min-height: 90px;
+    resize: vertical;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-family: inherit;
+}
+@media (max-width: 900px) {
+    .question-edit-grid {
+        grid-template-columns: 1fr;
+    }
+}
